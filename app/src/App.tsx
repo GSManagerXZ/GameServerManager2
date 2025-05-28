@@ -2773,7 +2773,7 @@ const checkServerStatus = async (gameId: string) => {
             </div>
           )}
         </Content>
-        <Footer style={{ textAlign: 'center' }}>GameServerManager ©2025 又菜又爱玩的小朱 最后更新日期5.28</Footer>
+        <Footer style={{ textAlign: 'center' }}>GameServerManager ©2025 又菜又爱玩的小朱 最后更新日期5.29</Footer>
       </Layout>
 
       {/* 安装终端Modal */}
