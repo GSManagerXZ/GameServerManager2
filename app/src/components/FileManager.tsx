@@ -50,9 +50,14 @@ interface ContextMenuPosition {
 
 interface FileManagerProps {
   initialPath?: string;
+  isVisible?: boolean; // New prop
 }
 
-const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam' }) => {
+const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', isVisible = true }) => {
+  // 创建一个唯一的实例ID，用于识别当前组件实例
+  const instanceId = useRef<string>(Math.random().toString(36).substring(2, 15));
+  const isMountedRef = useRef<boolean>(false); // Initialize to false, set to true in mount effect
+  
   const [currentPath, setCurrentPath] = useState<string>(initialPath || '/home/steam');
   const [files, setFiles] = useState<FileInfo[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -133,6 +138,16 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam' }
   // 添加窗口关闭事件监听
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      // 检查当前活跃的文件管理器实例是否是这个实例
+      if ((window as any).activeFileManagerId !== instanceId.current) {
+        return; // 如果不是当前实例，不处理事件
+      }
+      
+      // 检查组件是否已卸载
+      if (!isMountedRef.current) {
+        return; // 如果组件已卸载，不处理事件
+      }
+      
       if (isEditModalVisible && isFileModified) {
         // 现代浏览器不允许自定义消息，但这会触发浏览器的默认确认对话框
         e.preventDefault();
@@ -282,22 +297,20 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam' }
     setBlankContextMenuPosition(prev => ({ ...prev, visible: false }));
   };
 
-  // 在组件加载时添加点击事件监听器，用于隐藏右键菜单
-  useEffect(() => {
-    const handleClick = () => {
-      hideAllContextMenus();
-    };
-
-    document.addEventListener('click', handleClick);
-    return () => {
-      document.removeEventListener('click', handleClick);
-    };
-  }, []);
-
   // 添加键盘事件监听器
   useEffect(() => {
     // 在 useEffect 内部定义处理函数，避免循环依赖
     const handleKeyboardShortcuts = (e: KeyboardEvent) => {
+      // 检查当前活跃的文件管理器实例是否是这个实例
+      if ((window as any).activeFileManagerId !== instanceId.current) {
+        return; // 如果不是当前实例，不处理事件
+      }
+      
+      // 检查组件是否已卸载
+      if (!isMountedRef.current) {
+        return; // 如果组件已卸载，不处理事件
+      }
+
       // 如果有模态框打开，不处理快捷键
       if (isEditModalVisible || isRenameModalVisible || isPreviewModalVisible || 
           isNewFolderModalVisible || isNewFileModalVisible || isUploadModalVisible) {
@@ -347,7 +360,10 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam' }
       }
     };
 
+    // 添加事件监听器
     document.addEventListener('keydown', handleKeyboardShortcuts);
+    
+    // 组件卸载时移除事件监听器
     return () => {
       document.removeEventListener('keydown', handleKeyboardShortcuts);
     };
@@ -360,8 +376,32 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam' }
     isNewFolderModalVisible, 
     isNewFileModalVisible, 
     isUploadModalVisible,
-    saveFile  // 添加saveFile到依赖数组
+    saveFile
   ]);
+
+  // 在组件加载时添加点击事件监听器，用于隐藏右键菜单
+  useEffect(() => {
+    const handleClick = () => {
+      // 检查当前活跃的文件管理器实例是否是这个实例
+      if ((window as any).activeFileManagerId !== instanceId.current) {
+        return; // 如果不是当前实例，不处理事件
+      }
+      
+      // 检查组件是否已卸载
+      if (!isMountedRef.current) {
+        return; // 如果组件已卸载，不处理事件
+      }
+      
+      hideAllContextMenus();
+    };
+
+    document.addEventListener('click', handleClick);
+    
+    // 组件卸载时移除事件监听器
+    return () => {
+      document.removeEventListener('click', handleClick);
+    };
+  }, [hideAllContextMenus]); // hideAllContextMenus is stable or memoized correctly
 
   // 检查文件是否为图片
   const isImageFile = (filename: string): boolean => {
@@ -1356,6 +1396,38 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam' }
     setHelpModalVisible(true);
   };
 
+  // Effect 1: Manages isMountedRef. Runs once on mount and once on unmount.
+  // Also performs final cleanup for activeFileManagerId on true unmount.
+  useEffect(() => {
+    isMountedRef.current = true; // Component has mounted
+    return () => {
+      isMountedRef.current = false; // Component is unmounting
+      // If this instance was the active one when unmounting, clear the global active ID.
+      if ((window as any).activeFileManagerId === instanceId.current) {
+        (window as any).activeFileManagerId = null;
+      }
+    };
+  }, [instanceId]); // instanceId is stable, effectively runs once on mount/unmount.
+
+  // Effect 2: Manages activeFileManagerId based on isVisible prop and actual mount status.
+  // This effect runs after Effect 1 on mount, and whenever isVisible changes.
+  useEffect(() => {
+    if (isMountedRef.current) { // Only proceed if the component is actually mounted
+      if (isVisible) {
+        // If component is mounted AND visible, set it as the active file manager.
+        (window as any).activeFileManagerId = instanceId.current;
+      } else {
+        // If component is mounted BUT NOT visible (i.e., hidden by parent),
+        // and if it was the active one, clear the global active ID.
+        if ((window as any).activeFileManagerId === instanceId.current) {
+          (window as any).activeFileManagerId = null;
+        }
+      }
+    }
+    // The unmount cleanup for activeFileManagerId is primarily handled by Effect 1.
+    // When isVisible changes to false, activeFileManagerId is cleared above.
+  }, [isVisible, instanceId]); // Re-run when isVisible or instanceId (stable) changes.
+
   return (
     <>
       <div 
@@ -1407,6 +1479,14 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam' }
                   disabled={selectedFiles.length === 0}
                 >
                   压缩
+                </Button>
+                <Button 
+                  icon={<DeleteOutlined />} 
+                  onClick={deleteSelectedItems}
+                  disabled={selectedFiles.length === 0}
+                  danger
+                >
+                  删除
                 </Button>
                 <Button 
                   icon={<ReloadOutlined />} 

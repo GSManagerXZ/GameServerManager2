@@ -229,5 +229,15 @@
         "tip": "游戏端口：12881 UDP，请将保存位置映射到容器外部，防止存档丢失",
         "image":"https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/393420/header.jpg?t=1597169414",
         "url":"https://store.steampowered.com/app/393420/Hurtworld/"
+    },
+    "Fistful_of_Frags": {
+        "game_nameCN": "Fistful of Frags",
+        "appid": "295230",
+        "anonymous": true,
+        "script": true,
+        "script_name": "#!/bin/bash\ncd \"$(dirname \"$0\")\"\n./srcds_run -game fof +maxplayers 32 +map fof_depot",
+        "tip": "游戏端口：​27015 （UDP/TCP），请将保存位置映射到容器外部，防止存档丢失",
+        "image":"https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/265630/header.jpg?t=1709219464",
+        "url":"https://store.steampowered.com/app/265630/Fistful_of_Frags/"
     }
 }
