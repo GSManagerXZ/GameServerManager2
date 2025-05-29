@@ -533,7 +533,7 @@ def run_game_server(game_id, cmd, cwd):
         # 主线程等待进程完成
         return_code = process.wait()
         logger.info(f"游戏服务器 {game_id} 主进程已结束，返回码: {return_code}")
-        
+         
         # 确保服务器状态已更新
         if game_id in running_servers:
             running_servers[game_id]['return_code'] = return_code
@@ -580,10 +580,51 @@ def run_game_server(game_id, cmd, cwd):
             
         # 向队列添加错误消息
         if game_id in server_output_queues:
-            error_msg = f'服务器错误: {str(e)}'
-            server_output_queues[game_id].put({'complete': True, 'status': 'error', 'message': error_msg, 'error_details': error_msg})
+            error_info = str(e)
+            
+            # 对于特殊的'MCSERVER'错误，提供更详细的解释
+            if "'MCSERVER'" in error_info:
+                detailed_error = """
+启动游戏服务器失败:
+可能的原因:
+1. 服务器配置文件缺失或损坏
+2. 服务器执行脚本中存在语法错误
+3. 启动脚本中的环境变量未正确设置
+4. 服务器执行权限不足
+
+建议解决方案:
+1. 检查启动脚本的内容，确保语法正确
+2. 确认服务器目录下的配置文件是否完整
+3. 手动执行启动脚本，查看详细错误信息
+4. 检查服务器目录权限，确保steam用户有执行权限
+"""
+                error_msg = detailed_error
+                server_output_queues[game_id].put(error_msg)
+                error_details = "MCSERVER环境变量错误或启动脚本执行失败，请检查脚本内容和权限设置"
+            else:
+                error_msg = f"服务器错误: {error_info}"
+                server_output_queues[game_id].put(error_msg)
+                error_details = error_info
+                
+            # 添加完成消息，确保前端能收到详细错误信息
+            server_output_queues[game_id].put({
+                'complete': True, 
+                'status': 'error', 
+                'message': f'启动游戏服务器失败: {error_info}', 
+                'error_details': error_details
+            })
+            
             # 也添加为普通消息，确保在输出流中可见
-            server_output_queues[game_id].put(f"启动游戏服务器失败: {str(e)}")
+            server_output_queues[game_id].put(f"启动游戏服务器失败: {error_info}")
+            
+            # 如果是特殊错误，添加详细的故障排除步骤
+            if "'MCSERVER'" in error_info:
+                server_output_queues[game_id].put("请检查启动脚本内容，确保配置文件完整，并验证执行权限")
+                
+            # 确保保存到输出历史记录
+            if game_id in running_servers and 'output' in running_servers[game_id]:
+                running_servers[game_id]['output'].append(error_msg)
+                running_servers[game_id]['output'].append("请检查启动脚本内容，确保配置文件完整，并验证执行权限")
 
 # 添加一个新函数来确保目录权限正确
 def ensure_steam_permissions(directory):
@@ -1504,20 +1545,28 @@ def start_game_server():
         
         logger.info(f"游戏服务器 {game_id} 启动线程已启动，使用脚本: {script_name_to_run}")
         time.sleep(0.5)
-        server_output_queues[game_id].put("服务器启动中...")
         
-        # 添加一些额外的调试信息
+        # 确保队列存在并放入初始消息
+        if game_id not in server_output_queues:
+            # 理论上队列应该由run_game_server或其内部的output_forwarder创建
+            logger.warning(f"在start_game_server中发现游戏 {game_id} 的server_output_queue不存在，将创建一个新的。")
+            server_output_queues[game_id] = queue.Queue()
+            
+        server_output_queues[game_id].put("服务器启动中...")
         server_output_queues[game_id].put(f"游戏目录: {game_dir}")
         server_output_queues[game_id].put(f"启动脚本: {script_name_to_run}")
         server_output_queues[game_id].put(f"启动命令: {cmd}")
         
-        # 添加到输出历史
-        if 'output' not in running_servers[game_id]:
-            running_servers[game_id]['output'] = []
-        running_servers[game_id]['output'].append("服务器启动中...")
-        running_servers[game_id]['output'].append(f"游戏目录: {game_dir}")
-        running_servers[game_id]['output'].append(f"启动脚本: {script_name_to_run}")
-        running_servers[game_id]['output'].append(f"启动命令: {cmd}")
+        # 添加到输出历史 - 只有当服务器记录仍然存在时
+        if game_id in running_servers:
+            if 'output' not in running_servers[game_id]:
+                running_servers[game_id]['output'] = []
+            running_servers[game_id]['output'].append("服务器启动中...")
+            running_servers[game_id]['output'].append(f"游戏目录: {game_dir}")
+            running_servers[game_id]['output'].append(f"启动脚本: {script_name_to_run}")
+            running_servers[game_id]['output'].append(f"启动命令: {cmd}")
+        else:
+            logger.warning(f"游戏服务器 {game_id} 在尝试记录初始启动信息到running_servers时已不存在。可能已快速失败。")
         
         return jsonify({
             'status': 'success', 
@@ -2194,21 +2243,61 @@ def server_stream():
                 # 添加一条初始消息
                 server_output_queues[game_id].put(f"正在准备重启游戏服务器 {game_id}...")
             else:
-                # 检查是否有错误信息缓存
+                # 尝试从该服务器的输出队列中获取已有的错误信息
+                queued_error_message = None
+                queued_error_details = None
+                specific_error_found_in_queue = False
+
+                if game_id in server_output_queues and not server_output_queues[game_id].empty():
+                    logger.info(f"服务器 {game_id} 未运行，但其队列中存在消息，尝试读取错误信息")
+                    temp_queue_holder = []
+                    try:
+                        while not server_output_queues[game_id].empty():
+                            item = server_output_queues[game_id].get_nowait()
+                            temp_queue_holder.append(item) # 保存起来，如果不是错误消息，后面可能还需要
+                            if isinstance(item, dict) and item.get('complete') and item.get('status') == 'error':
+                                logger.info(f"从队列中找到错误完成消息: {item}")
+                                queued_error_message = item.get('message', '队列中发现错误')
+                                queued_error_details = item.get('error_details')
+                                specific_error_found_in_queue = True
+                                break # 找到主要错误，跳出
+                            elif isinstance(item, str) and ("错误" in item or "失败" in item or "error" in item.lower() or "fail" in item.lower()):
+                                # 如果是字符串类型的错误提示
+                                if not queued_error_message: # 优先使用字典类型的错误
+                                    queued_error_message = item
+                                if "MCSERVER" in item:
+                                     queued_error_details = queued_error_details or "请检查MCSERVER相关配置和脚本。"
+                                specific_error_found_in_queue = True 
+                    except queue.Empty:
+                        pass
+                    except Exception as e_q_read:
+                        logger.error(f"从队列读取先前错误信息时发生错误: {e_q_read}")
+                    
+                    # 如果没有从队列中找到明确的错误完成消息，但队列不为空，则把消息放回去，让后续的generate()处理
+                    if not specific_error_found_in_queue and temp_queue_holder:
+                        logger.info(f"未在队列 {game_id} 中找到特定错误完成消息，但队列非空。将重新填充队列内容供后续处理。")
+                        for prev_item in temp_queue_holder:
+                            server_output_queues[game_id].put(prev_item)
+                        # 这种情况下，我们依赖后续的 generate() 逻辑来处理队列中的常规消息
+                        # 或者，如果队列中只有非错误消息，最终也会走到下面的 temp_server_errors 逻辑
+
                 error_message = None
                 error_details = None
                 
-                # 尝试从服务器状态API获取错误信息
-                try:
-                    # 检查是否有临时错误信息
-                    temp_errors = getattr(app, 'temp_server_errors', {})
-                    if game_id in temp_errors:
-                        error_message = temp_errors[game_id].get('message', '未知错误')
-                        error_details = temp_errors[game_id].get('details', None)
-                        # 使用后删除临时错误
-                        del temp_errors[game_id]
-                except Exception as e:
-                    logger.error(f"获取临时错误信息失败: {str(e)}")
+                if specific_error_found_in_queue:
+                    error_message = queued_error_message
+                    error_details = queued_error_details
+                else:
+                    # 检查是否有临时错误信息 (通常是 start_game_server 直接抛出的错误)
+                    try:
+                        temp_errors = getattr(app, 'temp_server_errors', {})
+                        if game_id in temp_errors:
+                            error_message = temp_errors[game_id].get('message', '未知错误')
+                            error_details = temp_errors[game_id].get('details', None)
+                            # 使用后删除临时错误
+                            del temp_errors[game_id]
+                    except Exception as e:
+                        logger.error(f"获取临时错误信息失败: {str(e)}")
                 
                 # 返回SSE流，包含错误信息
                 def generate_error():
@@ -2216,6 +2305,24 @@ def server_stream():
                         yield f"data: {json.dumps({'line': f'游戏服务器 {game_id} 启动失败: {error_message}'})}\n\n"
                         if error_details:
                             yield f"data: {json.dumps({'line': f'错误详情: {error_details}'})}\n\n"
+                            
+                            # 对于特殊的'MCSERVER'错误，提供更详细的解释
+                            if "'MCSERVER'" in error_details:
+                                detailed_error = """
+启动游戏服务器失败: 'MCSERVER'
+可能的原因:
+1. 服务器配置文件缺失或损坏
+2. 服务器执行脚本中存在语法错误
+3. 启动脚本中的MCSERVER环境变量未正确设置
+4. 服务器执行权限不足
+
+建议解决方案:
+1. 检查启动脚本的内容，确保语法正确
+2. 确认服务器目录下的配置文件是否完整
+3. 手动执行启动脚本，查看详细错误信息
+4. 检查服务器目录权限，确保steam用户有执行权限
+"""
+                                yield f"data: {json.dumps({'line': detailed_error})}\n\n"
                     else:
                         yield f"data: {json.dumps({'line': f'游戏服务器 {game_id} 未运行或已停止'})}\n\n"
                     

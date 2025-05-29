@@ -85,6 +85,38 @@ const startServer = async (gameId: string, callback?: (line: any) => void, onCom
         if (data.complete) {
           console.log(`服务器输出完成，关闭SSE连接`);
           eventSource.close();
+          
+          // 检查是否有错误状态
+          if (data.status === 'error') {
+            const errorMessage = data.message || '未知错误';
+            const errorDetails = data.error_details || '';
+            console.error(`服务器完成但有错误: ${errorMessage}${errorDetails ? ', 详情: ' + errorDetails : ''}`);
+            
+            // 如果有错误详情，添加到输出
+            if (callback) {
+              if (errorDetails) {
+                callback(`错误详情: ${errorDetails}`);
+                if (errorDetails.includes('启动失败') || errorMessage.includes('启动失败')) {
+                  callback("---");
+                  callback("检测到 '启动失败' 错误。这通常与启动脚本、环境变量或服务器配置文件有关。");
+                  callback("请检查以下几点：");
+                  callback("1. 游戏目录下的启动脚本 (例如 start.sh) 内容是否正确，语法是否有误。");
+                  callback("---");
+                }
+              } else if (errorMessage.includes('启动失败')) {
+                //即使没有errorDetails，但errorMessage包含启动失败，也显示提示
+                callback("---");
+                callback("检测到 '启动失败' 错误。这通常与启动脚本、环境变量或服务器配置文件有关。");
+                callback("请检查以下几点：");
+                callback("1. 游戏目录下的启动脚本 (例如 start.sh) 内容是否正确，语法是否有误。");
+                callback("---");
+              }
+            }
+            
+            if (onError) onError(new Error(errorMessage));
+            return;
+          }
+          
           if (onComplete) onComplete();
           return;
         }
@@ -367,10 +399,29 @@ const checkServerStatus = async (gameId: string) => {
   }, [serverModalVisible]);
 
   // 导航和文件管理相关状态
-  const [currentNav, setCurrentNav] = useState<string>('dashboard');
+  const [currentNav, setCurrentNav_orig] = useState<string>('dashboard');
   const [collapsed, setCollapsed] = useState<boolean>(false);
-  const [fileManagerVisible, setFileManagerVisible] = useState<boolean>(false);
-  const [fileManagerPath, setFileManagerPath] = useState<string>('/home/steam');
+  const [fileManagerVisible, setFileManagerVisible_orig] = useState<boolean>(false);
+  const [fileManagerPath, setFileManagerPath_orig] = useState<string>('/home/steam');
+
+  // Wrapped state setters with logging
+  const setCurrentNav = (nav: string) => {
+    // const timestamp = () => new Date().toLocaleTimeString();
+    // console.log(`${timestamp()} APP: setCurrentNav called with: ${nav}. Current fileManagerVisible: ${fileManagerVisible}`);
+    setCurrentNav_orig(nav);
+  };
+
+  const setFileManagerVisible = (visible: boolean) => {
+    // const timestamp = () => new Date().toLocaleTimeString();
+    // console.log(`${timestamp()} APP: setFileManagerVisible called with: ${visible}. Current nav: ${currentNav}`);
+    setFileManagerVisible_orig(visible);
+  };
+
+  const setFileManagerPath = (path: string) => {
+    // const timestamp = () => new Date().toLocaleTimeString();
+    // console.log(`${timestamp()} APP: setFileManagerPath called with: ${path}`);
+    setFileManagerPath_orig(path);
+  };
   
   // 移动端适配状态
   const isMobile = useIsMobile();
@@ -977,8 +1028,26 @@ const checkServerStatus = async (gameId: string) => {
             },
             (error) => {
               console.error(`服务器输出错误: ${error.message}`);
-              handleError(error);
+              
+              // 向输出窗口添加错误信息
+              setServerOutputs(prev => {
+                const oldOutput = prev[gameId] || [];
+                return {
+                  ...prev,
+                  [gameId]: [
+                    ...oldOutput, 
+                    `错误: ${error.message}`, 
+                    "如果看到'启动失败'错误，请检查启动脚本和配置文件是否正确，并确保权限设置合适"
+                  ]
+                };
+              });
+              
+              // 显示错误消息
+              message.error(`${game.name} 服务器错误: ${error.message}`);
+              
+              // 发生错误时也刷新状态
               refreshServerStatus();
+              // 清除EventSource引用
               serverEventSourceRef.current = null;
             },
             true,
@@ -1697,15 +1766,17 @@ const checkServerStatus = async (gameId: string) => {
   // 监听打开文件管理器的事件
   useEffect(() => {
     const handleOpenFileManager = (event: CustomEvent) => {
+      // const timestamp = () => new Date().toLocaleTimeString();
+      // console.log(`${timestamp()} APP: handleOpenFileManager EVENT received. Detail:`, event.detail);
       const path = event.detail?.path;
-      // 检查路径是否有效，如果无效则使用默认路径
       if (path && typeof path === 'string' && path.startsWith('/')) {
-        setFileManagerPath(path);
+        setFileManagerPath(path); // Uses wrapped setter
       } else {
-        // 使用默认路径
-        setFileManagerPath('/home/steam');
+        setFileManagerPath('/home/steam'); // Uses wrapped setter
       }
-      setFileManagerVisible(true);
+      setFileManagerVisible(true); // Uses wrapped setter
+      // This should primarily control the Modal's visibility.
+      // It should NOT directly change currentNav if it's a true "nested window".
     };
 
     window.addEventListener('openFileManager', handleOpenFileManager as EventListener);
@@ -1717,11 +1788,14 @@ const checkServerStatus = async (gameId: string) => {
 
   // 添加处理打开文件夹的函数
   const handleOpenGameFolder = async (gameId: string) => {
+    // const timestamp = () => new Date().toLocaleTimeString();
+    // console.log(`${timestamp()} APP: handleOpenGameFolder called for gameId: ${gameId}`);
     try {
-      // 不再调用API，而是直接设置文件管理器路径并显示文件管理器
       const gamePath = `/home/steam/games/${gameId}`;
-      setFileManagerPath(gamePath);
-      setFileManagerVisible(true);
+      setFileManagerPath(gamePath);    // Uses wrapped setter
+      setFileManagerVisible(true); // Uses wrapped setter - this should open the Modal
+      message.info(`准备打开文件管理器: ${gamePath}`);
+      // setCurrentNav('files'); // We DON'T want to do this if it's a modal/nested window
     } catch (error) {
       message.error(`打开游戏文件夹失败: ${error}`);
     }
@@ -2751,7 +2825,12 @@ const checkServerStatus = async (gameId: string) => {
           {currentNav === 'files' && (
             <div className="file-management">
               <Title level={2}>文件管理</Title>
-              <FileManager initialPath={fileManagerPath || '/home/steam'} />
+              <FileManager 
+                initialPath={fileManagerPath || '/home/steam'} 
+                // This FileManager is part of the main navigation.
+                // Its visibility is tied to whether 'files' is the currentNav.
+                isVisible={currentNav === 'files'} 
+              />
             </div>
           )}
 
@@ -3088,11 +3167,16 @@ const checkServerStatus = async (gameId: string) => {
         )}
       </Modal>
       
-      {/* 文件管理器Modal */}
+      {/* 文件管理器Modal - THIS IS THE NESTED WINDOW */}
       <Modal
-        title={`游戏文件管理 - ${fileManagerPath.split('/').pop() || ''}`}
-        open={fileManagerVisible}
-        onCancel={() => setFileManagerVisible(false)}
+        title={`游戏文件管理 - ${fileManagerPath.split('/').pop() || ''}`} // Dynamic title based on path
+        open={fileManagerVisible} // Controlled by fileManagerVisible state
+        onCancel={() => {
+          // const timestamp = () => new Date().toLocaleTimeString();
+          // console.log(`${timestamp()} APP: Closing FileManager Modal via onCancel. Setting fileManagerVisible to false.`);
+          setFileManagerVisible(false); // Uses wrapped setter
+        }}
+        destroyOnClose // Ensures FileManager instance is unmounted when Modal is closed
         footer={null}
         width={isMobile ? "95%" : "80%"}
         style={{ top: 20 }}
@@ -3101,10 +3185,19 @@ const checkServerStatus = async (gameId: string) => {
           maxHeight: 'calc(100vh - 150px)',
           minHeight: isMobile ? '400px' : '550px',
           overflow: 'auto',
-          paddingBottom: '30px'
+          paddingBottom: '30px' // Added some padding at the bottom
         }}
       >
-        <FileManager initialPath={fileManagerPath} />
+        {/* 
+          Conditionally render FileManager only when the modal is supposed to be visible.
+          Crucially, pass fileManagerVisible to the isVisible prop of this FileManager instance.
+        */}
+        {fileManagerVisible && (
+          <FileManager 
+            initialPath={fileManagerPath} 
+            isVisible={fileManagerVisible} // Pass the modal's visibility state
+          />
+        )}
       </Modal>
       
       {/* 添加内网穿透文档弹窗 */}
