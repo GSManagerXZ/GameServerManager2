@@ -573,42 +573,76 @@ const checkServerStatus = async (gameId: string) => {
 
   // 添加一个防抖标志
   const isRefreshingRef = useRef<boolean>(false);
+  // 添加上次刷新时间记录
+  const lastRefreshTimeRef = useRef<number>(Date.now());
 
   // 检查正在运行的服务器
   const refreshServerStatus = useCallback(async () => {
     try {
       // 避免重复请求，使用防抖
       if (isRefreshingRef.current) return [];
+      
+      // 检查距离上次刷新的时间，如果小于3秒则跳过
+      const now = Date.now();
+      if (now - lastRefreshTimeRef.current < 3000) {
+        console.log('刷新服务器状态太频繁，跳过此次请求');
+        return runningServers; // 直接返回当前状态
+      }
+      
       isRefreshingRef.current = true;
+      lastRefreshTimeRef.current = now;
       
-      const response = await axios.get('/api/server/status');
-      isRefreshingRef.current = false;
+      // 设置请求超时
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒超时
       
-      if (response.data.status === 'success' && response.data.servers) {
-        const running = Object.keys(response.data.servers).filter(
-          id => response.data.servers[id].status === 'running'
-        );
-        
-        // 只有当运行状态真正变化时才更新状态
-        setRunningServers(prevRunning => {
-          // 检查是否有变化
-          if (prevRunning.length !== running.length || 
-              !prevRunning.every(id => running.includes(id))) {
-            return running;
-          }
-          return prevRunning;
+      try {
+        const response = await axios.get('/api/server/status', {
+          signal: controller.signal,
+          timeout: 5000
         });
         
-        return running;
+        // 清除超时计时器
+        clearTimeout(timeoutId);
+        
+        if (response.data.status === 'success' && response.data.servers) {
+          const running = Object.keys(response.data.servers).filter(
+            id => response.data.servers[id].status === 'running'
+          );
+          
+          // 只有当运行状态真正变化时才更新状态
+          setRunningServers(prevRunning => {
+            // 检查是否有变化
+            if (prevRunning.length !== running.length || 
+                !prevRunning.every(id => running.includes(id))) {
+              return running;
+            }
+            return prevRunning;
+          });
+          
+          isRefreshingRef.current = false;
+          return running;
+        }
+      } catch (error) {
+        // 清除超时计时器
+        clearTimeout(timeoutId);
+        
+        // 处理超时或网络错误
+        if (error.name === 'AbortError' || error.code === 'ECONNABORTED') {
+          console.warn('服务器状态请求超时');
+        } else {
+          console.error('检查服务器状态失败:', error);
+        }
       }
-    } catch (error) {
-      console.error('检查服务器状态失败:', error);
+      
       isRefreshingRef.current = false;
-      return [];
+      return runningServers; // 出错时返回当前状态
+    } catch (error) {
+      console.error('刷新服务器状态失败:', error);
+      isRefreshingRef.current = false;
+      return runningServers; // 出错时返回当前状态
     }
-    
-    return [];
-  }, []);
+  }, [runningServers]);
 
   // 安装游戏的处理函数
   const handleInstall = useCallback(async (game: GameInfo, account?: string, password?: string) => {
@@ -1954,27 +1988,69 @@ const checkServerStatus = async (gameId: string) => {
     // 加载自启动服务器列表
     loadAutoRestartServers();
     
-    // 设置定时器，每15秒刷新一次服务器状态，避免频繁刷新
-    const intervalId = setInterval(() => {
+    // 设置定时器，根据运行服务器数量调整刷新频率，避免频繁刷新
+    const interval = setInterval(() => {
+      // 只在当前页面是服务器管理或仪表盘时刷新
       if (currentNav === 'servers' || currentNav === 'dashboard') {
-        refreshServerStatus();
+        // 根据运行中的服务器数量调整刷新间隔
+        if (runningServers.length > 0) {
+          // 有服务器运行时，降低刷新频率，避免卡顿
+          const now = Date.now();
+          if (now - lastRefreshTimeRef.current >= 30000) { // 至少30秒刷新一次
+            refreshServerStatus();
+          }
+        } else {
+          // 没有服务器运行时，可以适当提高刷新频率
+          refreshServerStatus();
+        }
       }
-    }, 15000);
+    }, 15000); // 基础间隔为15秒
     
     // 组件卸载时清除定时器
-    return () => clearInterval(intervalId);
-  }, [refreshServerStatus, currentNav]);
+    return () => clearInterval(interval);
+  }, [refreshServerStatus, currentNav, runningServers.length]);
+  
+  // 服务端状态刷新优化总结：
+  // 1. 使用防抖机制避免短时间内多次触发刷新，通过isRefreshingRef和lastRefreshTimeRef控制
+  // 2. 根据运行服务器数量动态调整刷新频率，有服务器运行时降低频率至少30秒一次
+  // 3. 添加请求超时处理，避免请求挂起导致页面卡顿
+  // 4. 在切换标签页时检查上次刷新时间，避免频繁刷新
+  // 5. 后端添加缓存机制，减少计算密集型操作（如游戏空间计算）
+  // 6. 使用AbortController实现请求取消，防止请求堆积
 
   // 当切换到服务器tab时刷新状态，但避免重复刷新
   useEffect(() => {
     if (currentNav === 'servers') {
       // 使用setTimeout避免可能的渲染冲突
       const timer = setTimeout(() => {
-        refreshServerStatus();
+        // 检查距离上次刷新的时间，如果小于5秒则跳过
+        const now = Date.now();
+        if (now - lastRefreshTimeRef.current >= 5000) {
+          console.log('切换到服务器管理页面，刷新服务器状态');
+          refreshServerStatus();
+        } else {
+          console.log('切换到服务器管理页面，但上次刷新时间太近，跳过刷新');
+        }
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [currentNav, refreshServerStatus]);
+  }, [currentNav, refreshServerStatus, lastRefreshTimeRef]);
+
+  // 添加标签页切换处理函数
+  const handleTabChange = useCallback((key: string) => {
+    setTabKey(key);
+    // 如果切换到"正在运行服务端"标签页，刷新服务器状态
+    if (key === 'running') {
+      // 检查距离上次刷新的时间，如果小于5秒则跳过
+      const now = Date.now();
+      if (now - lastRefreshTimeRef.current >= 5000) {
+        console.log('切换到正在运行服务端标签页，刷新服务器状态');
+        refreshServerStatus();
+      } else {
+        console.log('切换到正在运行服务端标签页，但上次刷新时间太近，跳过刷新');
+      }
+    }
+  }, [refreshServerStatus, lastRefreshTimeRef]);
 
   const [frpDocModalVisible, setFrpDocModalVisible] = useState<boolean>(false);
   
@@ -2465,7 +2541,7 @@ const checkServerStatus = async (gameId: string) => {
           {currentNav === 'servers' && (
             <div className="running-servers">
               <Title level={2}>服务端管理</Title>
-              <Tabs defaultActiveKey="all">
+              <Tabs defaultActiveKey="all" onChange={handleTabChange}>
                 <TabPane tab="全部服务端" key="all">
                   <div className="server-management">
                     <div className="server-controls">
@@ -2847,6 +2923,61 @@ const checkServerStatus = async (gameId: string) => {
                                 size="small" 
                                 checked={autoRestartServers.includes(game.id)}
                                 onChange={(checked) => handleAutoRestartChange(game.id, checked)}
+                                style={{marginLeft: 4}}
+                              />
+                            </div>
+                          </Card>
+                        </Col>
+                      ))}
+                      
+                    {/* 显示其他运行中的服务器（可能是未识别的外部游戏） */}
+                    {runningServers
+                      .filter(id => !games.some(g => g.id === id) && !externalGames.some(g => g.id === id))
+                      .map(id => (
+                        <Col key={id} xs={24} sm={12} md={8} lg={6}>
+                          <Card
+                            title={
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <span>{id}</span>
+                                <Tag color="purple">未识别</Tag>
+                              </div>
+                            }
+                            extra={<Tag color="green">运行中</Tag>}
+                            style={{ borderRadius: '8px', overflow: 'hidden' }}
+                          >
+                            <div style={{marginBottom: 12}}>
+                              <p>位置: /home/steam/games/{id}</p>
+                            </div>
+                            <div style={{display: 'flex', justifyContent: 'space-between'}}>
+                              <Button 
+                                type="default" 
+                                danger
+                                size="small" 
+                                onClick={() => handleStopServer(id)}
+                              >
+                                停止
+                              </Button>
+                              <Button 
+                                type="primary" 
+                                size="small"
+                                onClick={() => handleStartServer(id, true)}
+                              >
+                                控制台
+                              </Button>
+                              <Button
+                                icon={<FolderOutlined />}
+                                size="small"
+                                onClick={() => handleOpenGameFolder(id)}
+                              >
+                                文件夹
+                              </Button>
+                            </div>
+                            <div style={{marginTop: 8}}>
+                              自启动: 
+                              <Switch 
+                                size="small" 
+                                checked={autoRestartServers.includes(id)}
+                                onChange={(checked) => handleAutoRestartChange(id, checked)}
                                 style={{marginLeft: 4}}
                               />
                             </div>

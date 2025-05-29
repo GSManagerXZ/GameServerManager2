@@ -2045,169 +2045,82 @@ def server_send_input():
         logger.error(f"向游戏服务器发送输入失败: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+# 添加服务器状态缓存
+server_status_cache = {}
+server_status_timestamp = 0
+server_status_lock = threading.Lock()
+
 @app.route('/api/server/status', methods=['GET'])
 def server_status():
-    """获取游戏服务器状态"""
+    """获取指定游戏或所有游戏的服务器状态"""
+    global server_status_cache, server_status_timestamp
     try:
         game_id = request.args.get('game_id')
         
+        # 检查是否可以使用缓存（5秒内的缓存有效）
+        current_time = time.time()
+        use_cache = False
+        
+        with server_status_lock:
+            if current_time - server_status_timestamp < 5 and server_status_cache:
+                use_cache = True
+                cached_response = server_status_cache
+        
+        if use_cache and not game_id:
+            # 返回所有服务器的缓存状态
+            logger.debug("使用缓存的服务器状态")
+            return jsonify(cached_response)
+        
+        # 如果请求特定游戏的状态，或者缓存无效，则重新获取
         if game_id:
-            # 获取特定游戏服务器的状态
-            if game_id not in running_servers:
-                return jsonify({'status': 'success', 'server_status': 'stopped'})
-                
-            server_data = running_servers[game_id]
-            process = server_data.get('process')
-            pty_process = server_data.get('pty_process')
-            process_id = server_data.get('process_id') or f"server_{game_id}"
-            
-            # 检查进程是否仍在运行
-            is_running = False
-            
-            # 首先检查subprocess进程
-            if process:
-                if process.poll() is None:
-                    is_running = True
-                    # 使用psutil进行额外验证
-                    try:
-                        if psutil.pid_exists(process.pid):
-                            p = psutil.Process(process.pid)
-                            if p.status() in ['running', 'sleeping', 'disk-sleep', 'waking']:
-                                is_running = True
-                            else:
-                                logger.warning(f"进程 {process.pid} 存在但状态为: {p.status()}")
-                                is_running = False
-                        else:
-                            is_running = False
-                    except Exception as e:
-                        logger.error(f"使用psutil检查进程状态时出错: {str(e)}")
-            
-            # 然后检查PTY进程
-            if not is_running and pty_process:
-                if hasattr(pty_process, 'running') and pty_process.running:
-                    is_running = True
-            
-            # 最后检查PTY管理器中的进程
-            if not is_running and pty_manager.get_process(process_id):
-                pty_proc = pty_manager.get_process(process_id)
-                if pty_proc and pty_proc.is_running():
-                    is_running = True
+            # 获取特定游戏的服务器状态
+            server_data = running_servers.get(game_id)
+            if server_data:
+                process = server_data.get('process')
+                if process and process.poll() is None:
+                    # 服务器正在运行
+                    return jsonify({
+                        'status': 'success',
+                        'server_status': 'running',
+                        'started_at': server_data.get('started_at'),
+                        'uptime': time.time() - server_data.get('started_at', time.time())
+                    })
+                else:
+                    # 服务器已停止
+                    return jsonify({
+                        'status': 'success',
+                        'server_status': 'stopped'
+                    })
+            else:
+                # 服务器未启动
+                return jsonify({
+                    'status': 'success',
+                    'server_status': 'stopped'
+                })
+        else:
+            # 获取所有服务器的状态
+            servers = {}
+            for server_id, server_data in running_servers.items():
+                process = server_data.get('process')
+                if process and process.poll() is None:
+                    # 服务器正在运行
+                    servers[server_id] = {
+                        'status': 'running',
+                        'started_at': server_data.get('started_at'),
+                        'uptime': time.time() - server_data.get('started_at', time.time())
+                    }
             
             response = {
                 'status': 'success',
-                'server_status': 'running' if is_running else 'stopped',
-                'pid': process.pid if process else None,
-                'started_at': server_data.get('started_at'),
-                'uptime': time.time() - server_data.get('started_at', time.time())
+                'servers': servers
             }
             
-            # 添加返回码（如果存在）
-            if 'return_code' in server_data and server_data['return_code'] is not None:
-                response['return_code'] = server_data['return_code']
-                
-            # 添加错误信息（如果存在）
-            if 'error' in server_data and server_data['error']:
-                response['error'] = server_data['error']
-                # 如果有错误且进程已停止，标记状态为'error'而不是'stopped'
-                if not is_running:
-                    response['server_status'] = 'error'
-                    
-                # 如果错误信息很长，可能包含详细的脚本错误输出，提取并单独添加
-                if isinstance(server_data['error'], str) and len(server_data['error']) > 100 and '\n\n' in server_data['error']:
-                    try:
-                        # 尝试分离错误消息和详细输出
-                        parts = server_data['error'].split('\n\n', 1)
-                        if len(parts) > 1 and '错误输出:' in parts[1]:
-                            response['error_message'] = parts[0]
-                            response['error_details'] = parts[1]
-                    except Exception as e:
-                        logger.warning(f"处理错误详情时出错: {str(e)}")
-            
-            # 添加脚本名称（如果存在）
-            if 'script_name' in server_data:
-                response['script_name'] = server_data['script_name']
+            # 更新缓存
+            with server_status_lock:
+                server_status_cache = response
+                server_status_timestamp = current_time
             
             return jsonify(response)
-        else:
-            # 获取所有游戏服务器的状态
-            servers = {}
-            for game_id, server_data in running_servers.items():
-                process = server_data.get('process')
-                pty_process = server_data.get('pty_process')
-                process_id = server_data.get('process_id') or f"server_{game_id}"
-                
-                # 检查进程是否仍在运行
-                is_running = False
-                
-                # 首先检查subprocess进程
-                if process:
-                    if process.poll() is None:
-                        is_running = True
-                        # 使用psutil进行额外验证
-                        try:
-                            if psutil.pid_exists(process.pid):
-                                p = psutil.Process(process.pid)
-                                if p.status() in ['running', 'sleeping', 'disk-sleep', 'waking']:
-                                    is_running = True
-                                else:
-                                    logger.warning(f"进程 {process.pid} 存在但状态为: {p.status()}")
-                                    is_running = False
-                            else:
-                                is_running = False
-                        except Exception as e:
-                            logger.error(f"使用psutil检查进程状态时出错: {str(e)}")
-                
-                # 然后检查PTY进程
-                if not is_running and pty_process:
-                    if hasattr(pty_process, 'running') and pty_process.running:
-                        is_running = True
-                
-                # 最后检查PTY管理器中的进程
-                if not is_running and pty_manager.get_process(process_id):
-                    pty_proc = pty_manager.get_process(process_id)
-                    if pty_proc and pty_proc.is_running():
-                        is_running = True
-                
-                server_info = {
-                    'status': 'running' if is_running else 'stopped',
-                    'pid': process.pid if process else None,
-                    'started_at': server_data.get('started_at'),
-                    'uptime': time.time() - server_data.get('started_at', time.time())
-                }
-                
-                # 添加返回码（如果存在）
-                if 'return_code' in server_data and server_data['return_code'] is not None:
-                    server_info['return_code'] = server_data['return_code']
-                
-                # 添加错误信息（如果存在）
-                if 'error' in server_data and server_data['error']:
-                    server_info['error'] = server_data['error']
-                    # 如果有错误且进程已停止，标记状态为'error'而不是'stopped'
-                    if not is_running:
-                        server_info['status'] = 'error'
-                        
-                    # 如果错误信息很长，可能包含详细的脚本错误输出，提取并单独添加
-                    if isinstance(server_data['error'], str) and len(server_data['error']) > 100 and '\n\n' in server_data['error']:
-                        try:
-                            # 尝试分离错误消息和详细输出
-                            parts = server_data['error'].split('\n\n', 1)
-                            if len(parts) > 1 and '错误输出:' in parts[1]:
-                                server_info['error_message'] = parts[0]
-                                server_info['error_details'] = parts[1]
-                        except Exception as e:
-                            logger.warning(f"处理错误详情时出错: {str(e)}")
-                
-                # 添加脚本名称（如果存在）
-                if 'script_name' in server_data:
-                    server_info['script_name'] = server_data['script_name']
-                
-                servers[game_id] = server_info
-                    
-            return jsonify({
-                'status': 'success',
-                'servers': servers
-            })
-            
     except Exception as e:
         logger.error(f"获取服务器状态失败: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -2555,6 +2468,10 @@ def server_stream():
 def get_container_info():
     """获取容器信息，包括系统资源占用、已安装游戏和正在运行的游戏"""
     try:
+        # 设置超时处理
+        timeout_seconds = 5  # 5秒超时
+        start_time = time.time()
+        
         # 获取CPU型号信息
         cpu_model = "未知"
         try:
@@ -2576,46 +2493,89 @@ def get_container_info():
             logger.error(f"获取CPU型号时出错: {str(e)}")
             cpu_model = "获取失败"
 
+        # 检查是否超时
+        if time.time() - start_time > timeout_seconds:
+            logger.warning("获取CPU型号超时")
+            return jsonify({
+                'status': 'success',
+                'system_info': {
+                    'cpu_usage': 0,
+                    'cpu_model': '获取超时',
+                    'cpu_cores': 0,
+                    'cpu_logical_cores': 0,
+                    'memory': {'total': 0, 'used': 0, 'percent': 0},
+                    'disk': {'total': 0, 'used': 0, 'percent': 0}
+                },
+                'installed_games': [],
+                'running_games': []
+            })
+
         # 获取内存频率信息
         memory_freq = "未知"
         try:
             if sys.platform == "linux" or sys.platform == "linux2":
                 # Linux系统，尝试从dmidecode获取
                 try:
-                    memory_info = subprocess.check_output(['dmidecode', '-t', 'memory'], stderr=subprocess.STDOUT).decode()
+                    memory_info = subprocess.check_output(['dmidecode', '-t', 'memory'], stderr=subprocess.STDOUT, timeout=2).decode()
                     for line in memory_info.split('\n'):
                         if "Speed" in line and "MHz" in line and not "Unknown" in line:
                             memory_freq = line.split(':', 1)[1].strip()
                             break
+                except subprocess.TimeoutExpired:
+                    logger.warning("获取内存频率命令超时")
+                    memory_freq = "获取超时"
                 except:
                     # 尝试从/proc/meminfo获取，但通常不包含频率信息
                     memory_freq = "无法获取"
             elif sys.platform == "darwin":
                 # macOS系统
                 try:
-                    memory_info = subprocess.check_output(['system_profiler', 'SPMemoryDataType']).decode()
+                    memory_info = subprocess.check_output(['system_profiler', 'SPMemoryDataType'], timeout=2).decode()
                     for line in memory_info.split('\n'):
                         if "Speed" in line:
                             memory_freq = line.split(':', 1)[1].strip()
                             break
+                except subprocess.TimeoutExpired:
+                    logger.warning("获取内存频率命令超时")
+                    memory_freq = "获取超时"
                 except:
                     memory_freq = "无法获取"
             elif sys.platform == "win32":
                 # Windows系统，尝试使用wmic
                 try:
-                    memory_info = subprocess.check_output(['wmic', 'memorychip', 'get', 'speed']).decode()
+                    memory_info = subprocess.check_output(['wmic', 'memorychip', 'get', 'speed'], timeout=2).decode()
                     lines = memory_info.strip().split('\n')
                     if len(lines) > 1:
                         memory_freq = lines[1].strip() + " MHz"
+                except subprocess.TimeoutExpired:
+                    logger.warning("获取内存频率命令超时")
+                    memory_freq = "获取超时"
                 except:
                     memory_freq = "无法获取"
         except Exception as e:
             logger.error(f"获取内存频率时出错: {str(e)}")
             memory_freq = "获取失败"
 
+        # 检查是否超时
+        if time.time() - start_time > timeout_seconds:
+            logger.warning("获取内存频率超时")
+            return jsonify({
+                'status': 'success',
+                'system_info': {
+                    'cpu_usage': 0,
+                    'cpu_model': cpu_model,
+                    'cpu_cores': 0,
+                    'cpu_logical_cores': 0,
+                    'memory': {'total': 0, 'used': 0, 'percent': 0, 'frequency': '获取超时'},
+                    'disk': {'total': 0, 'used': 0, 'percent': 0}
+                },
+                'installed_games': [],
+                'running_games': []
+            })
+
         # 获取系统信息
         system_info = {
-            'cpu_usage': psutil.cpu_percent(),
+            'cpu_usage': psutil.cpu_percent(interval=None),  # 使用非阻塞方式获取CPU使用率
             'cpu_model': cpu_model,
             'cpu_cores': psutil.cpu_count(logical=False),  # 物理核心数
             'cpu_logical_cores': psutil.cpu_count(logical=True),  # 逻辑核心数
@@ -2634,30 +2594,134 @@ def get_container_info():
         
         # 获取游戏目录磁盘使用情况
         if os.path.exists(GAMES_DIR):
-            disk_usage = shutil.disk_usage(GAMES_DIR)
-            system_info['disk'] = {
-                'total': disk_usage.total / (1024 * 1024 * 1024),  # GB
-                'used': disk_usage.used / (1024 * 1024 * 1024),    # GB
-                'percent': disk_usage.used * 100 / disk_usage.total if disk_usage.total > 0 else 0
-            }
+            try:
+                disk_usage = shutil.disk_usage(GAMES_DIR)
+                system_info['disk'] = {
+                    'total': disk_usage.total / (1024 * 1024 * 1024),  # GB
+                    'used': disk_usage.used / (1024 * 1024 * 1024),    # GB
+                    'percent': disk_usage.used * 100 / disk_usage.total if disk_usage.total > 0 else 0
+                }
+            except Exception as e:
+                logger.error(f"获取磁盘信息失败: {str(e)}")
+                system_info['disk'] = {'total': 0, 'used': 0, 'percent': 0}
             
-            # 计算各游戏占用空间
+            # 检查是否超时
+            if time.time() - start_time > timeout_seconds:
+                logger.warning("获取磁盘信息超时")
+                return jsonify({
+                    'status': 'success',
+                    'system_info': system_info,
+                    'installed_games': [],
+                    'running_games': []
+                })
+            
+            # 计算各游戏占用空间，但限制处理时间
             games_space = {}
-            for game_id in os.listdir(GAMES_DIR):
-                game_path = os.path.join(GAMES_DIR, game_id)
-                if os.path.isdir(game_path):
-                    try:
-                        size = 0
-                        for dirpath, dirnames, filenames in os.walk(game_path):
-                            for f in filenames:
-                                fp = os.path.join(dirpath, f)
-                                if os.path.exists(fp):
-                                    size += os.path.getsize(fp)
-                        games_space[game_id] = size / (1024 * 1024)  # MB
-                    except Exception as e:
-                        logger.error(f"计算游戏 {game_id} 空间占用时出错: {str(e)}")
-                        games_space[game_id] = 0
+            remaining_time = timeout_seconds - (time.time() - start_time)
+            
+            # 检查是否有服务器正在运行
+            has_running_servers = False
+            for game_id, server_data in running_servers.items():
+                process = server_data.get('process')
+                if process and process.poll() is None:
+                    has_running_servers = True
+                    break
+            
+            # 如果有服务器正在运行，跳过详细的空间计算，使用估算值或缓存
+            if has_running_servers:
+                logger.info("检测到有服务器正在运行，跳过详细的游戏空间计算")
+                
+                # 尝试从缓存加载游戏空间数据
+                try:
+                    cache_file = os.path.join(os.path.dirname(GAMES_DIR), 'games_space_cache.json')
+                    if os.path.exists(cache_file) and (time.time() - os.path.getmtime(cache_file) < 3600):  # 1小时内的缓存有效
+                        with open(cache_file, 'r') as f:
+                            games_space = json.load(f)
+                            logger.info(f"从缓存加载游戏空间数据: {len(games_space)} 个游戏")
+                    else:
+                        # 使用快速估算
+                        for game_id in os.listdir(GAMES_DIR):
+                            game_path = os.path.join(GAMES_DIR, game_id)
+                            if os.path.isdir(game_path):
+                                try:
+                                    # 使用du命令快速估算
+                                    try:
+                                        du_output = subprocess.check_output(['du', '-sm', game_path], timeout=1).decode()
+                                        size = float(du_output.split()[0]) * 1024 * 1024  # 转换为字节
+                                    except:
+                                        # 如果du命令失败，使用目录大小作为估算
+                                        size = os.path.getsize(game_path)
+                                    
+                                    games_space[game_id] = size / (1024 * 1024)  # MB
+                                except Exception as e:
+                                    logger.error(f"估算游戏 {game_id} 空间占用时出错: {str(e)}")
+                                    games_space[game_id] = 0
+                        
+                        # 保存到缓存
+                        try:
+                            with open(cache_file, 'w') as f:
+                                json.dump(games_space, f)
+                        except Exception as e:
+                            logger.error(f"保存游戏空间缓存失败: {str(e)}")
+                except Exception as e:
+                    logger.error(f"处理游戏空间缓存时出错: {str(e)}")
+            elif remaining_time > 0:
+                # 没有服务器运行，可以进行详细计算
+                game_dirs = os.listdir(GAMES_DIR)
+                time_per_game = remaining_time / (len(game_dirs) or 1)
+                
+                for game_id in game_dirs:
+                    game_start_time = time.time()
+                    game_path = os.path.join(GAMES_DIR, game_id)
+                    if os.path.isdir(game_path):
+                        try:
+                            size = 0
+                            for dirpath, dirnames, filenames in os.walk(game_path):
+                                # 检查是否超过每个游戏的时间限制
+                                if time.time() - game_start_time > time_per_game:
+                                    logger.warning(f"计算游戏 {game_id} 空间占用超时")
+                                    size = -1  # 使用-1表示计算超时
+                                    break
+                                    
+                                for f in filenames:
+                                    fp = os.path.join(dirpath, f)
+                                    if os.path.exists(fp):
+                                        size += os.path.getsize(fp)
+                            
+                            # 如果超时，使用估算值
+                            if size == -1:
+                                # 尝试使用du命令快速估算
+                                try:
+                                    du_output = subprocess.check_output(['du', '-sm', game_path], timeout=1).decode()
+                                    size = float(du_output.split()[0]) * 1024 * 1024  # 转换为字节
+                                except:
+                                    # 如果du命令失败，使用目录大小作为估算
+                                    size = os.path.getsize(game_path)
+                            
+                            games_space[game_id] = size / (1024 * 1024)  # MB
+                        except Exception as e:
+                            logger.error(f"计算游戏 {game_id} 空间占用时出错: {str(e)}")
+                            games_space[game_id] = 0
+                
+                # 保存到缓存
+                try:
+                    cache_file = os.path.join(os.path.dirname(GAMES_DIR), 'games_space_cache.json')
+                    with open(cache_file, 'w') as f:
+                        json.dump(games_space, f)
+                except Exception as e:
+                    logger.error(f"保存游戏空间缓存失败: {str(e)}")
+            
             system_info['games_space'] = games_space
+        
+        # 检查是否超时
+        if time.time() - start_time > timeout_seconds:
+            logger.warning("计算游戏空间占用超时")
+            return jsonify({
+                'status': 'success',
+                'system_info': system_info,
+                'installed_games': [],
+                'running_games': []
+            })
         
         # 获取已安装游戏（仅包含在配置中的游戏）
         installed_games = []
@@ -2672,6 +2736,16 @@ def get_container_info():
                         'size_mb': system_info['games_space'].get(name, 0) if 'games_space' in system_info else 0
                     }
                     installed_games.append(game_info)
+        
+        # 检查是否超时
+        if time.time() - start_time > timeout_seconds:
+            logger.warning("获取已安装游戏列表超时")
+            return jsonify({
+                'status': 'success',
+                'system_info': system_info,
+                'installed_games': installed_games,
+                'running_games': []
+            })
         
         # 获取正在运行的游戏
         running_games = []
@@ -2698,7 +2772,17 @@ def get_container_info():
         })
     except Exception as e:
         logger.error(f"获取容器信息失败: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({
+            'status': 'error', 
+            'message': str(e),
+            'system_info': {
+                'cpu_usage': 0,
+                'memory': {'total': 0, 'used': 0, 'percent': 0},
+                'disk': {'total': 0, 'used': 0, 'percent': 0}
+            },
+            'installed_games': [],
+            'running_games': []
+        }), 500
 
 # 添加一个清理安装输出的函数，类似于清理服务器输出的函数
 def clean_installation_output(game_id):
