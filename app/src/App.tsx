@@ -571,35 +571,44 @@ const checkServerStatus = async (gameId: string) => {
     loadAll();
   }, []);
 
+  // 添加一个防抖标志
+  const isRefreshingRef = useRef<boolean>(false);
+
   // 检查正在运行的服务器
   const refreshServerStatus = useCallback(async () => {
     try {
-      // console.log('正在刷新服务器状态...');
+      // 避免重复请求，使用防抖
+      if (isRefreshingRef.current) return [];
+      isRefreshingRef.current = true;
+      
       const response = await axios.get('/api/server/status');
+      isRefreshingRef.current = false;
       
       if (response.data.status === 'success' && response.data.servers) {
         const running = Object.keys(response.data.servers).filter(
           id => response.data.servers[id].status === 'running'
         );
         
-        // console.log('当前运行中的服务器:', running);
-        
-        // 更新运行中的服务器列表
-        setRunningServers(running);
-        
-        // 如果有选中的服务器游戏，检查它是否在运行
-        if (selectedServerGame && !running.includes(selectedServerGame.id)) {
-          // console.log(`选中的服务器 ${selectedServerGame.id} 已停止运行`);
-        }
+        // 只有当运行状态真正变化时才更新状态
+        setRunningServers(prevRunning => {
+          // 检查是否有变化
+          if (prevRunning.length !== running.length || 
+              !prevRunning.every(id => running.includes(id))) {
+            return running;
+          }
+          return prevRunning;
+        });
         
         return running;
       }
     } catch (error) {
       console.error('检查服务器状态失败:', error);
+      isRefreshingRef.current = false;
+      return [];
     }
     
     return [];
-  }, [selectedServerGame]);
+  }, []);
 
   // 安装游戏的处理函数
   const handleInstall = useCallback(async (game: GameInfo, account?: string, password?: string) => {
@@ -1023,7 +1032,10 @@ const checkServerStatus = async (gameId: string) => {
             },
             () => {
               message.success(`${game.name} 服务器已停止`);
-              refreshServerStatus();
+              // 立即更新UI中的服务器状态
+              setRunningServers(prev => prev.filter(id => id !== gameId));
+              // 然后再刷新实际状态
+              setTimeout(() => refreshServerStatus(), 500);
               serverEventSourceRef.current = null;
             },
             (error) => {
@@ -1046,7 +1058,10 @@ const checkServerStatus = async (gameId: string) => {
               message.error(`${game.name} 服务器错误: ${error.message}`);
               
               // 发生错误时也刷新状态
-              refreshServerStatus();
+              // 立即更新UI中的服务器状态
+              setRunningServers(prev => prev.filter(id => id !== gameId));
+              // 然后再刷新实际状态
+              setTimeout(() => refreshServerStatus(), 500);
               // 清除EventSource引用
               serverEventSourceRef.current = null;
             },
@@ -1214,6 +1229,14 @@ const checkServerStatus = async (gameId: string) => {
     }
   };
 
+  // 添加一个清理服务器输出的函数
+  const clearServerOutput = useCallback((gameId: string) => {
+    setServerOutputs(prev => ({
+      ...prev,
+      [gameId]: []
+    }));
+  }, []);
+
   const handleStopServer = useCallback(async (gameId: string, force = false) => {
     try {
       // 如果不是强制停止，先显示确认对话框
@@ -1231,15 +1254,24 @@ const checkServerStatus = async (gameId: string) => {
           cancelText: '取消',
           okButtonProps: { type: 'primary' },
           onOk: async () => {
+            // 显示加载消息
+            const loadingKey = `stopping_${gameId}`;
+            message.loading({ content: '正在停止服务器...', key: loadingKey, duration: 0 });
+            
+            // 立即在UI中反映状态变化，提高响应速度
+            setRunningServers(prev => prev.filter(id => id !== gameId));
+            
             const response = await stopServer(gameId, false);
             
             if (response.status === 'success') {
-              message.success(`服务器已标准停止`);
-              refreshServerStatus();
+              message.success({ content: `服务器已标准停止`, key: loadingKey });
+              // 刷新服务器状态
+              setTimeout(() => refreshServerStatus(), 500);
               // 清空服务器输出
               clearServerOutput(gameId);
             } else if (response.status === 'warning') {
               // 处理警告状态，例如服务器未响应标准停止
+              message.warning({ content: response.message || '服务器可能未完全停止', key: loadingKey });
               Modal.confirm({
                 title: '停止服务器警告',
                 content: response.message || '服务器未完全停止，是否尝试强行停止？',
@@ -1248,6 +1280,12 @@ const checkServerStatus = async (gameId: string) => {
                 okButtonProps: { danger: true },
                 onOk: () => handleStopServer(gameId, true),
               });
+              // 刷新服务器状态以确认实际状态
+              setTimeout(() => refreshServerStatus(), 500);
+            } else {
+              message.error({ content: response.message || '停止服务器失败', key: loadingKey });
+              // 刷新服务器状态以确认实际状态
+              setTimeout(() => refreshServerStatus(), 500);
             }
           },
           footer: (_, { OkBtn, CancelBtn }) => (
@@ -1261,12 +1299,20 @@ const checkServerStatus = async (gameId: string) => {
         return;
       }
       
+      // 显示加载消息
+      const loadingKey = `stopping_${gameId}`;
+      message.loading({ content: `正在强制停止服务器...`, key: loadingKey, duration: 0 });
+      
+      // 立即在UI中反映状态变化，提高响应速度
+      setRunningServers(prev => prev.filter(id => id !== gameId));
+      
       // 发送停止请求
       const response = await stopServer(gameId, force);
       
       if (response.status === 'success') {
-        // 刷新运行中的服务器列表
-        refreshServerStatus();
+        message.success({ content: `服务器已强制停止`, key: loadingKey });
+        // 刷新服务器状态
+        setTimeout(() => refreshServerStatus(), 500);
         // 清空服务器输出
         clearServerOutput(gameId);
         
@@ -1275,8 +1321,8 @@ const checkServerStatus = async (gameId: string) => {
           // 处理警告状态，服务器可能仍在运行
           Modal.confirm({
             title: '服务器可能仍在运行',
-            content: '服务器报告已停止，但状态检查显示可能仍在运行。是否尝试强制停止？',
-            okText: '强制停止',
+            content: '服务器报告已停止，但状态检查显示可能仍在运行。是否尝试再次强制停止？',
+            okText: '再次强制停止',
             cancelText: '忽略',
             okButtonProps: { danger: true },
             onOk: () => handleStopServer(gameId, true),
@@ -1284,29 +1330,28 @@ const checkServerStatus = async (gameId: string) => {
         }
       } else if (response.status === 'warning') {
         // 处理警告状态，例如服务器未响应标准停止
+        message.warning({ content: response.message || '服务器可能未完全停止', key: loadingKey });
         Modal.confirm({
           title: '停止服务器警告',
-          content: response.message || '服务器未完全停止，是否尝试强行停止？',
-          okText: '强行停止',
+          content: response.message || '服务器未完全停止，是否再次尝试强行停止？',
+          okText: '再次强制停止',
           cancelText: '取消',
           okButtonProps: { danger: true },
           onOk: () => handleStopServer(gameId, true),
         });
+        // 刷新服务器状态以确认实际状态
+        setTimeout(() => refreshServerStatus(), 500);
+      } else {
+        message.error({ content: response.message || '停止服务器失败', key: loadingKey });
+        // 刷新服务器状态以确认实际状态
+        setTimeout(() => refreshServerStatus(), 500);
       }
     } catch (error) {
       // 即使出错也刷新服务器状态
-      refreshServerStatus();
+      setTimeout(() => refreshServerStatus(), 500);
       handleError(error);
     }
-  }, [refreshServerStatus]);
-
-  // 添加一个清理服务器输出的函数
-  const clearServerOutput = useCallback((gameId: string) => {
-    setServerOutputs(prev => ({
-      ...prev,
-      [gameId]: []
-    }));
-  }, []);
+  }, [refreshServerStatus, clearServerOutput]);
 
   const handleServerInput = useCallback(async (gameId: string, value: string) => {
     try {
@@ -1884,7 +1929,14 @@ const checkServerStatus = async (gameId: string) => {
       if (response.data.status === 'success') {
         message.success(`已${checked ? '开启' : '关闭'}服务端自启动`);
         // 更新自启动服务器列表
-        loadAutoRestartServers();
+        setAutoRestartServers(prev => {
+          if (checked && !prev.includes(gameId)) {
+            return [...prev, gameId];
+          } else if (!checked) {
+            return prev.filter(id => id !== gameId);
+          }
+          return prev;
+        });
       } else {
         message.error(response.data.message || '操作失败');
       }
@@ -1902,21 +1954,25 @@ const checkServerStatus = async (gameId: string) => {
     // 加载自启动服务器列表
     loadAutoRestartServers();
     
-    // 设置定时器，每10秒刷新一次服务器状态
+    // 设置定时器，每15秒刷新一次服务器状态，避免频繁刷新
     const intervalId = setInterval(() => {
       if (currentNav === 'servers' || currentNav === 'dashboard') {
         refreshServerStatus();
       }
-    }, 10000);
+    }, 15000);
     
     // 组件卸载时清除定时器
     return () => clearInterval(intervalId);
   }, [refreshServerStatus, currentNav]);
 
-  // 当切换到服务器tab时刷新状态
+  // 当切换到服务器tab时刷新状态，但避免重复刷新
   useEffect(() => {
     if (currentNav === 'servers') {
-      refreshServerStatus();
+      // 使用setTimeout避免可能的渲染冲突
+      const timer = setTimeout(() => {
+        refreshServerStatus();
+      }, 100);
+      return () => clearTimeout(timer);
     }
   }, [currentNav, refreshServerStatus]);
 
@@ -2103,7 +2159,7 @@ const checkServerStatus = async (gameId: string) => {
                 {
                   key: 'servers',
                   icon: <PlayCircleOutlined />,
-                  label: '运行服务端'
+                  label: '服务端管理'
                 },
                 {
                   key: 'frp',
@@ -2168,7 +2224,7 @@ const checkServerStatus = async (gameId: string) => {
             {
               key: 'servers',
               icon: <PlayCircleOutlined />,
-              label: '运行服务端'
+              label: '服务端管理'
             },
             {
               key: 'frp',
@@ -2402,9 +2458,16 @@ const checkServerStatus = async (gameId: string) => {
                     </Card>
                   </div>
                 </TabPane>
-                <TabPane tab="服务端管理" key="server">
+              </Tabs>
+            </div>
+          )}
+          
+          {currentNav === 'servers' && (
+            <div className="running-servers">
+              <Title level={2}>服务端管理</Title>
+              <Tabs defaultActiveKey="all">
+                <TabPane tab="全部服务端" key="all">
                   <div className="server-management">
-                    <Title level={3}>游戏服务端列表</Title>
                     <div className="server-controls">
                       <Button onClick={refreshGameLists} icon={<ReloadOutlined />} style={{marginRight: 8}}>刷新列表</Button>
                       <Button onClick={refreshServerStatus} icon={<ReloadOutlined />}>刷新状态</Button>
@@ -2679,146 +2742,128 @@ const checkServerStatus = async (gameId: string) => {
                     </Row>
                   </div>
                 </TabPane>
+                <TabPane tab="正在运行服务端" key="running">
+                  <div className="server-controls">
+                    <Button onClick={refreshServerStatus} icon={<ReloadOutlined />} style={{ marginBottom: 16 }}>
+                      刷新状态
+                    </Button>
+                  </div>
+                  <Row gutter={[16, 16]}>
+                    {/* 显示配置中的游戏 */}
+                    {games
+                      .filter(game => runningServers.includes(game.id))
+                      .map(game => (
+                        <Col key={game.id} xs={24} sm={12} md={8} lg={6}>
+                          <Card
+                            title={game.name}
+                            extra={<Tag color="green">运行中</Tag>}
+                            style={{ borderRadius: '8px', overflow: 'hidden' }}
+                          >
+                            <div style={{marginBottom: 12}}>
+                              <p>位置: /home/steam/games/{game.id}</p>
+                            </div>
+                            <div style={{display: 'flex', justifyContent: 'space-between'}}>
+                              <Button 
+                                type="default" 
+                                danger
+                                size="small" 
+                                onClick={() => handleStopServer(game.id)}
+                              >
+                                停止
+                              </Button>
+                              <Button 
+                                type="primary" 
+                                size="small"
+                                onClick={() => handleStartServer(game.id, true)}
+                              >
+                                控制台
+                              </Button>
+                              <Button
+                                icon={<FolderOutlined />}
+                                size="small"
+                                onClick={() => handleOpenGameFolder(game.id)}
+                              >
+                                文件夹
+                              </Button>
+                            </div>
+                            <div style={{marginTop: 8}}>
+                              自启动: 
+                              <Switch 
+                                size="small" 
+                                checked={autoRestartServers.includes(game.id)}
+                                onChange={(checked) => handleAutoRestartChange(game.id, checked)}
+                                style={{marginLeft: 4}}
+                              />
+                            </div>
+                          </Card>
+                        </Col>
+                      ))}
+                      
+                    {/* 显示外部游戏 */}
+                    {externalGames
+                      .filter(game => runningServers.includes(game.id))
+                      .map(game => (
+                        <Col key={game.id} xs={24} sm={12} md={8} lg={6}>
+                          <Card
+                            title={
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <span>{game.name}</span>
+                                <Tag color="orange">外来</Tag>
+                              </div>
+                            }
+                            extra={<Tag color="green">运行中</Tag>}
+                            style={{ borderRadius: '8px', overflow: 'hidden' }}
+                          >
+                            <div style={{marginBottom: 12}}>
+                              <p>位置: /home/steam/games/{game.id}</p>
+                            </div>
+                            <div style={{display: 'flex', justifyContent: 'space-between'}}>
+                              <Button 
+                                type="default" 
+                                danger
+                                size="small" 
+                                onClick={() => handleStopServer(game.id)}
+                              >
+                                停止
+                              </Button>
+                              <Button 
+                                type="primary" 
+                                size="small"
+                                onClick={() => handleStartServer(game.id, true)}
+                              >
+                                控制台
+                              </Button>
+                              <Button
+                                icon={<FolderOutlined />}
+                                size="small"
+                                onClick={() => handleOpenGameFolder(game.id)}
+                              >
+                                文件夹
+                              </Button>
+                            </div>
+                            <div style={{marginTop: 8}}>
+                              自启动: 
+                              <Switch 
+                                size="small" 
+                                checked={autoRestartServers.includes(game.id)}
+                                onChange={(checked) => handleAutoRestartChange(game.id, checked)}
+                                style={{marginLeft: 4}}
+                              />
+                            </div>
+                          </Card>
+                        </Col>
+                      ))}
+                      
+                    {runningServers.length === 0 && (
+                      <Col span={24}>
+                        <div className="empty-servers">
+                          <p>当前没有正在运行的服务端</p>
+                        </div>
+                      </Col>
+                    )}
+                  </Row>
+                </TabPane>
               </Tabs>
-            </div>
-          )}
-          
-          {currentNav === 'servers' && (
-            <div className="running-servers">
-              <Title level={2}>运行中的服务端</Title>
-              <Button onClick={refreshServerStatus} icon={<ReloadOutlined />} style={{ marginBottom: 16 }}>
-                刷新状态
-              </Button>
-              <Row gutter={[16, 16]}>
-                {/* 显示配置中的游戏 */}
-                {games
-                  .filter(game => runningServers.includes(game.id))
-                  .map(game => (
-                    <Col key={game.id} xs={24} sm={12} md={8} lg={6}>
-                      <Card
-                        title={game.name}
-                        extra={<Tag color="green">运行中</Tag>}
-                        style={{ borderRadius: '8px', overflow: 'hidden' }}
-                        actions={[
-                          <Button
-                            key="console"
-                            type="primary"
-                            size="small"
-                            style={{ width: '100%', maxWidth: '100px' }}
-                            onClick={() => handleStartServer(game.id)}
-                          >
-                            控制台
-                          </Button>,
-                          <Button
-                            key="folder"
-                            icon={<FolderOutlined />}
-                            size="small"
-                            style={{ width: '100%', maxWidth: '100px' }}
-                            onClick={() => handleOpenGameFolder(game.id)}
-                          >
-                            文件夹
-                          </Button>,
-                          <Dropdown key="stop" overlay={
-                            <Menu>
-                              <Menu.Item key="1" onClick={() => handleStopServer(game.id, false)}>
-                                标准停止(Ctrl+C)
-                              </Menu.Item>
-                              <Menu.Item key="2" danger onClick={() => handleStopServer(game.id, true)}>
-                                强行停止(Kill)
-                              </Menu.Item>
-                            </Menu>
-                          } trigger={['click']} overlayClassName="stop-server-dropdown">
-                            <Button danger size="small" style={{ width: '100%', maxWidth: '100px' }}>
-                              停止服务端 <DownOutlined />
-                            </Button>
-                          </Dropdown>
-                        ]}
-                      >
-                        <p>位置: /home/steam/games/{game.id}</p>
-                        <div style={{marginTop: 8}}>
-                          自启动: 
-                          <Switch 
-                            size="small" 
-                            checked={autoRestartServers.includes(game.id)}
-                            onChange={(checked) => handleAutoRestartChange(game.id, checked)}
-                            style={{marginLeft: 4}}
-                          />
-                        </div>
-                      </Card>
-                    </Col>
-                  ))}
-                  
-                {/* 显示运行中的外部游戏 */}
-                {externalGames
-                  .filter(game => runningServers.includes(game.id))
-                  .map(game => (
-                    <Col key={game.id} xs={24} sm={12} md={8} lg={6}>
-                      <Card
-                        title={
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <span>{game.name}</span>
-                            <Tag color="orange">外来</Tag>
-                          </div>
-                        }
-                        extra={<Tag color="green">运行中</Tag>}
-                        style={{ borderRadius: '8px', overflow: 'hidden' }}
-                        actions={[
-                          <Button
-                            key="console"
-                            type="primary"
-                            size="small"
-                            style={{ width: '100%', maxWidth: '100px' }}
-                            onClick={() => handleStartServer(game.id)}
-                          >
-                            控制台
-                          </Button>,
-                          <Button
-                            key="folder"
-                            icon={<FolderOutlined />}
-                            size="small"
-                            style={{ width: '100%', maxWidth: '100px' }}
-                            onClick={() => handleOpenGameFolder(game.id)}
-                          >
-                            文件夹
-                          </Button>,
-                          <Dropdown key="stop" overlay={
-                            <Menu>
-                              <Menu.Item key="1" onClick={() => handleStopServer(game.id, false)}>
-                                标准停止(Ctrl+C)
-                              </Menu.Item>
-                              <Menu.Item key="2" danger onClick={() => handleStopServer(game.id, true)}>
-                                强行停止(Kill)
-                              </Menu.Item>
-                            </Menu>
-                          } trigger={['click']} overlayClassName="stop-server-dropdown">
-                            <Button danger size="small" style={{ width: '100%', maxWidth: '100px' }}>
-                              停止服务端 <DownOutlined />
-                            </Button>
-                          </Dropdown>
-                        ]}
-                      >
-                        <p>位置: /home/steam/games/{game.id}</p>
-                        <div style={{marginTop: 8}}>
-                          自启动: 
-                          <Switch 
-                            size="small" 
-                            checked={autoRestartServers.includes(game.id)}
-                            onChange={(checked) => handleAutoRestartChange(game.id, checked)}
-                            style={{marginLeft: 4}}
-                          />
-                        </div>
-                      </Card>
-                    </Col>
-                  ))}
-                  
-                {runningServers.length === 0 && (
-                  <Col span={24}>
-                    <div className="empty-servers">
-                      <p>当前没有正在运行的服务端</p>
-                    </div>
-                  </Col>
-                )}
-              </Row>
             </div>
           )}
 

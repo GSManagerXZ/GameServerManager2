@@ -4757,28 +4757,6 @@ def get_network_info():
                 network_interfaces[interface]['duplex'] = stats.duplex
                 network_interfaces[interface]['mtu'] = stats.mtu
         
-        # 获取公网IP
-        public_ip = {
-            'ipv4': None,
-            'ipv6': None
-        }
-        
-        try:
-            # 获取公网IPv4
-            ipv4_response = requests.get('https://ipv4.ip.mir6.com', timeout=5)
-            if ipv4_response.status_code == 200:
-                public_ip['ipv4'] = ipv4_response.text
-        except Exception as e:
-            logger.warning(f"获取公网IPv4失败: {str(e)}")
-            
-        try:
-            # 获取公网IPv6
-            ipv6_response = requests.get('https://ipv6.ip.mir6.com', timeout=5)
-            if ipv6_response.status_code == 200:
-                public_ip['ipv6'] = ipv6_response.text
-        except Exception as e:
-            logger.warning(f"获取公网IPv6失败: {str(e)}")
-            
         # 获取网络流量统计
         net_io = psutil.net_io_counters(pernic=True)
         io_stats = {}
@@ -4796,6 +4774,50 @@ def get_network_info():
                     'dropout': stats.dropout
                 }
         
+        # 创建一个后台线程来异步获取公网IP，不阻塞主请求
+        def fetch_public_ip():
+            public_ip = {
+                'ipv4': None,
+                'ipv6': None
+            }
+            
+            try:
+                # 获取公网IPv4
+                ipv4_response = requests.get('https://ipv4.ip.mir6.com', timeout=5)
+                if ipv4_response.status_code == 200:
+                    public_ip['ipv4'] = ipv4_response.text
+            except Exception as e:
+                logger.warning(f"获取公网IPv4失败: {str(e)}")
+                
+            try:
+                # 获取公网IPv6
+                ipv6_response = requests.get('https://ipv6.ip.mir6.com', timeout=5)
+                if ipv6_response.status_code == 200:
+                    public_ip['ipv6'] = ipv6_response.text
+            except Exception as e:
+                logger.warning(f"获取公网IPv6失败: {str(e)}")
+                
+            # 更新缓存
+            with public_ip_lock:
+                global cached_public_ip, public_ip_timestamp
+                cached_public_ip = public_ip
+                public_ip_timestamp = time.time()
+        
+        # 使用缓存的公网IP或启动异步更新
+        public_ip = {
+            'ipv4': None,
+            'ipv6': None
+        }
+        
+        with public_ip_lock:
+            current_time = time.time()
+            # 如果缓存存在且未过期（5分钟有效期）
+            if cached_public_ip and current_time - public_ip_timestamp < 300:
+                public_ip = cached_public_ip
+            else:
+                # 如果缓存不存在或已过期，启动后台线程更新
+                threading.Thread(target=fetch_public_ip, daemon=True).start()
+        
         return jsonify({
             'status': 'success',
             'network_interfaces': network_interfaces,
@@ -4805,6 +4827,152 @@ def get_network_info():
     except Exception as e:
         logger.error(f"获取网络信息失败: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# 添加公网IP缓存相关变量
+cached_public_ip = None
+public_ip_timestamp = 0
+public_ip_lock = threading.Lock()
+
+@app.route('/api/settings/sponsor-key', methods=['POST'])
+def save_sponsor_key():
+    """保存赞助者凭证到配置文件"""
+    try:
+        data = request.json
+        sponsor_key = data.get('sponsorKey')
+        
+        if not sponsor_key:
+            return jsonify({'status': 'error', 'message': '赞助者凭证不能为空'}), 400
+            
+        # 加载现有配置
+        config_path = "/home/steam/games/config.json"
+        existing_config = {}
+        
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    existing_config = json.load(f)
+            except Exception as e:
+                logger.error(f"读取配置文件失败: {str(e)}")
+                
+        # 确保目录存在
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        
+        # 添加或更新赞助者凭证
+        existing_config['sponsor_key'] = sponsor_key
+        
+        # 保存配置
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(existing_config, f, indent=4)
+            
+        logger.info("赞助者凭证已保存")
+        return jsonify({'status': 'success', 'message': '赞助者凭证已保存'})
+        
+    except Exception as e:
+        logger.error(f"保存赞助者凭证时出错: {str(e)}")
+        return jsonify({'status': 'error', 'message': f'保存赞助者凭证失败: {str(e)}'}), 500
+
+@app.route('/api/settings/sponsor-key', methods=['GET'])
+def get_sponsor_key():
+    """获取当前赞助者凭证"""
+    try:
+        # 加载配置文件
+        config_path = "/home/steam/games/config.json"
+        
+        if not os.path.exists(config_path):
+            return jsonify({'status': 'success', 'sponsor_key': None})
+            
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                sponsor_key = config.get('sponsor_key')
+                
+                # 为了安全起见，只返回是否存在凭证，不返回完整凭证
+                if sponsor_key:
+                    # 只返回前四个字符和最后四个字符，中间用星号代替
+                    masked_key = sponsor_key[:4] + '*' * (len(sponsor_key) - 8) + sponsor_key[-4:] if len(sponsor_key) > 8 else sponsor_key
+                    return jsonify({
+                        'status': 'success', 
+                        'has_sponsor_key': True,
+                        'masked_sponsor_key': masked_key
+                    })
+                else:
+                    return jsonify({'status': 'success', 'has_sponsor_key': False})
+                    
+        except Exception as e:
+            logger.error(f"读取配置文件失败: {str(e)}")
+            return jsonify({'status': 'error', 'message': f'读取配置文件失败: {str(e)}'}), 500
+            
+    except Exception as e:
+        logger.error(f"获取赞助者凭证时出错: {str(e)}")
+        return jsonify({'status': 'error', 'message': f'获取赞助者凭证失败: {str(e)}'}), 500
+
+@app.route('/api/server/list_scripts', methods=['GET'])
+def list_server_scripts():
+    """获取服务器目录下所有可执行的sh脚本"""
+    try:
+        game_id = request.args.get('game_id')
+        
+        if not game_id:
+            logger.error("缺少游戏ID")
+            return jsonify({'status': 'error', 'message': '缺少游戏ID'}), 400
+            
+        logger.info(f"请求获取游戏 {game_id} 的可执行脚本列表")
+        
+        # 检查游戏是否已安装
+        game_dir = os.path.join(GAMES_DIR, game_id)
+        if not os.path.exists(game_dir) or not os.path.isdir(game_dir):
+            logger.error(f"游戏 {game_id} 未安装")
+            return jsonify({'status': 'error', 'message': f'游戏 {game_id} 未安装'}), 400
+        
+        # 查找所有.sh文件
+        scripts = []
+        for file in os.listdir(game_dir):
+            file_path = os.path.join(game_dir, file)
+            if file.endswith('.sh') and os.path.isfile(file_path) and os.access(file_path, os.X_OK):
+                # 检查文件是否有执行权限
+                scripts.append({
+                    'name': file,
+                    'path': file_path,
+                    'size': os.path.getsize(file_path),
+                    'mtime': os.path.getmtime(file_path)
+                })
+        
+        logger.info(f"找到 {len(scripts)} 个可执行脚本: {[script['name'] for script in scripts]}")
+        
+        return jsonify({
+            'status': 'success',
+            'scripts': scripts
+        })
+        
+    except Exception as e:
+        logger.error(f"获取可执行脚本列表失败: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# 定期清理临时错误信息
+def clean_temp_errors():
+    """定期清理超过5分钟的临时错误信息"""
+    while True:
+        try:
+            if hasattr(app, 'temp_server_errors'):
+                now = time.time()
+                expired_keys = []
+                for game_id, error_info in app.temp_server_errors.items():
+                    if now - error_info.get('timestamp', 0) > 300:  # 5分钟
+                        expired_keys.append(game_id)
+                
+                for game_id in expired_keys:
+                    del app.temp_server_errors[game_id]
+                    logger.debug(f"已清理游戏 {game_id} 的临时错误信息")
+        except Exception as e:
+            logger.error(f"清理临时错误信息时出错: {str(e)}")
+        
+        # 每分钟检查一次
+        time.sleep(60)
+
+# 启动清理线程
+error_cleaner_thread = threading.Thread(target=clean_temp_errors, daemon=True)
+error_cleaner_thread.start()
+logger.info("临时错误信息清理线程已启动")
 
 # 添加自启动相关的常量和函数
 CONFIG_FILE = "/home/steam/games/config.json"
@@ -5163,147 +5331,6 @@ def monitor_frp_processes():
 # 启动FRP监控线程
 frp_monitor_thread = threading.Thread(target=monitor_frp_processes, daemon=True)
 frp_monitor_thread.start()
-
-@app.route('/api/settings/sponsor-key', methods=['POST'])
-def save_sponsor_key():
-    """保存赞助者凭证到配置文件"""
-    try:
-        data = request.json
-        sponsor_key = data.get('sponsorKey')
-        
-        if not sponsor_key:
-            return jsonify({'status': 'error', 'message': '赞助者凭证不能为空'}), 400
-            
-        # 加载现有配置
-        config_path = "/home/steam/games/config.json"
-        existing_config = {}
-        
-        if os.path.exists(config_path):
-            try:
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    existing_config = json.load(f)
-            except Exception as e:
-                logger.error(f"读取配置文件失败: {str(e)}")
-                
-        # 确保目录存在
-        os.makedirs(os.path.dirname(config_path), exist_ok=True)
-        
-        # 添加或更新赞助者凭证
-        existing_config['sponsor_key'] = sponsor_key
-        
-        # 保存配置
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump(existing_config, f, indent=4)
-            
-        logger.info("赞助者凭证已保存")
-        return jsonify({'status': 'success', 'message': '赞助者凭证已保存'})
-        
-    except Exception as e:
-        logger.error(f"保存赞助者凭证时出错: {str(e)}")
-        return jsonify({'status': 'error', 'message': f'保存赞助者凭证失败: {str(e)}'}), 500
-
-@app.route('/api/settings/sponsor-key', methods=['GET'])
-def get_sponsor_key():
-    """获取当前赞助者凭证"""
-    try:
-        # 加载配置文件
-        config_path = "/home/steam/games/config.json"
-        
-        if not os.path.exists(config_path):
-            return jsonify({'status': 'success', 'sponsor_key': None})
-            
-        try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                sponsor_key = config.get('sponsor_key')
-                
-                # 为了安全起见，只返回是否存在凭证，不返回完整凭证
-                if sponsor_key:
-                    # 只返回前四个字符和最后四个字符，中间用星号代替
-                    masked_key = sponsor_key[:4] + '*' * (len(sponsor_key) - 8) + sponsor_key[-4:] if len(sponsor_key) > 8 else sponsor_key
-                    return jsonify({
-                        'status': 'success', 
-                        'has_sponsor_key': True,
-                        'masked_sponsor_key': masked_key
-                    })
-                else:
-                    return jsonify({'status': 'success', 'has_sponsor_key': False})
-                    
-        except Exception as e:
-            logger.error(f"读取配置文件失败: {str(e)}")
-            return jsonify({'status': 'error', 'message': f'读取配置文件失败: {str(e)}'}), 500
-            
-    except Exception as e:
-        logger.error(f"获取赞助者凭证时出错: {str(e)}")
-        return jsonify({'status': 'error', 'message': f'获取赞助者凭证失败: {str(e)}'}), 500
-
-@app.route('/api/server/list_scripts', methods=['GET'])
-def list_server_scripts():
-    """获取服务器目录下所有可执行的sh脚本"""
-    try:
-        game_id = request.args.get('game_id')
-        
-        if not game_id:
-            logger.error("缺少游戏ID")
-            return jsonify({'status': 'error', 'message': '缺少游戏ID'}), 400
-            
-        logger.info(f"请求获取游戏 {game_id} 的可执行脚本列表")
-        
-        # 检查游戏是否已安装
-        game_dir = os.path.join(GAMES_DIR, game_id)
-        if not os.path.exists(game_dir) or not os.path.isdir(game_dir):
-            logger.error(f"游戏 {game_id} 未安装")
-            return jsonify({'status': 'error', 'message': f'游戏 {game_id} 未安装'}), 400
-        
-        # 查找所有.sh文件
-        scripts = []
-        for file in os.listdir(game_dir):
-            file_path = os.path.join(game_dir, file)
-            if file.endswith('.sh') and os.path.isfile(file_path) and os.access(file_path, os.X_OK):
-                # 检查文件是否有执行权限
-                scripts.append({
-                    'name': file,
-                    'path': file_path,
-                    'size': os.path.getsize(file_path),
-                    'mtime': os.path.getmtime(file_path)
-                })
-        
-        logger.info(f"找到 {len(scripts)} 个可执行脚本: {[script['name'] for script in scripts]}")
-        
-        return jsonify({
-            'status': 'success',
-            'scripts': scripts
-        })
-        
-    except Exception as e:
-        logger.error(f"获取可执行脚本列表失败: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-# 定期清理临时错误信息
-def clean_temp_errors():
-    """定期清理超过5分钟的临时错误信息"""
-    while True:
-        try:
-            if hasattr(app, 'temp_server_errors'):
-                now = time.time()
-                expired_keys = []
-                for game_id, error_info in app.temp_server_errors.items():
-                    if now - error_info.get('timestamp', 0) > 300:  # 5分钟
-                        expired_keys.append(game_id)
-                
-                for game_id in expired_keys:
-                    del app.temp_server_errors[game_id]
-                    logger.debug(f"已清理游戏 {game_id} 的临时错误信息")
-        except Exception as e:
-            logger.error(f"清理临时错误信息时出错: {str(e)}")
-        
-        # 每分钟检查一次
-        time.sleep(60)
-
-# 启动清理线程
-error_cleaner_thread = threading.Thread(target=clean_temp_errors, daemon=True)
-error_cleaner_thread.start()
-logger.info("临时错误信息清理线程已启动")
 
 if __name__ == '__main__':
     logger.warning("检测到直接运行api_server.py")
