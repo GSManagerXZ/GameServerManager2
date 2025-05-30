@@ -2,10 +2,10 @@
 
 # GameServerManager <small>beta</small>
 
-> 一个可以在Linux上运行几乎所有steam游戏服务端的容器项目。
+> GSManager 一个注重单机游戏快速开服管理面板，一键部署steam游戏服务端
 
 [介绍](README.md)
-[快速入门](/docs/快速入门.md) \
-[Github](https://github.com/yxsj245/gameserver_container) 
+[部署指南](/docs/部署指南.md) \
+[Github](https://github.com/yxsj245/GameServerManager) 
 [Gitee](https://gitee.com/xiao-zhu245/gameserver_container) \
-[查看发行版信息](https://gitee.com/xiao-zhu245/gameserver_container/releases)
+[查看发行版信息](https://github.com/yxsj245/GameServerManager/releases)
