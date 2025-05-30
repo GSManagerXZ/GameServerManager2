@@ -23,6 +23,7 @@ var/
 # JWT配置文件
 server/config.json
 docs/
+frp/
 
 # 日志文件
 *.log
