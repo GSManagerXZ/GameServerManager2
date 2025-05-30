@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Layout, Typography, Row, Col, Card, Button, Spin, message, Tooltip, Modal, Tabs, Form, Input, Menu, Tag, Dropdown, Radio, Drawer, Switch, List } from 'antd';
+import { Layout, Typography, Row, Col, Card, Button, Spin, message, Tooltip, Modal, Tabs, Form, Input, Menu, Tag, Dropdown, Radio, Drawer, Switch, List, Select } from 'antd';
 import { CloudServerOutlined, DashboardOutlined, AppstoreOutlined, PlayCircleOutlined, ReloadOutlined, DownOutlined, InfoCircleOutlined, FolderOutlined, UserOutlined, LogoutOutlined, LockOutlined, GlobalOutlined, MenuOutlined, SettingOutlined, ToolOutlined, BookOutlined } from '@ant-design/icons';
 import axios from 'axios';
 // 导入antd样式
@@ -314,6 +314,12 @@ const checkServerStatus = async (gameId: string) => {
     const savedPreference = localStorage.getItem('enableInactiveEffect');
     return savedPreference === null ? true : savedPreference === 'true';
   });
+  
+  // 备份相关状态
+  const [backupTasks, setBackupTasks] = useState<any[]>([]);
+  const [backupModalVisible, setBackupModalVisible] = useState(false);
+  const [editingBackupTask, setEditingBackupTask] = useState<any>(null);
+  const [backupForm] = Form.useForm();
   
   // 保存不活动效果设置到localStorage
   useEffect(() => {
@@ -1888,6 +1894,131 @@ const checkServerStatus = async (gameId: string) => {
     message.success('注册成功，欢迎使用游戏容器！');
   };
 
+  // 备份相关处理函数
+  const refreshBackupTasks = useCallback(async () => {
+    try {
+      const response = await axios.get('/api/backup/tasks');
+      if (response.data.status === 'success') {
+        setBackupTasks(response.data.tasks || []);
+      }
+    } catch (error) {
+      console.error('获取备份任务失败:', error);
+      message.error('获取备份任务失败');
+    }
+  }, []);
+
+  const handleToggleBackupTask = async (taskId: string) => {
+    try {
+      const response = await axios.post(`/api/backup/tasks/${taskId}/toggle`);
+      if (response.data.status === 'success') {
+        const task = response.data.task;
+        const statusText = task.enabled ? '启用' : '禁用';
+        message.success(`备份任务已${statusText}`);
+        refreshBackupTasks();
+      }
+    } catch (error) {
+      console.error('切换备份任务状态失败:', error);
+      message.error('操作失败');
+    }
+  };
+
+  const handleRunBackupNow = async (taskId: string) => {
+    try {
+      const response = await axios.post(`/api/backup/tasks/${taskId}/run`);
+      if (response.data.status === 'success') {
+        message.success('备份任务已启动');
+      }
+    } catch (error) {
+      console.error('启动备份任务失败:', error);
+      message.error('启动备份任务失败');
+    }
+  };
+
+  const handleEditBackupTask = (task: any) => {
+    setEditingBackupTask(task);
+    
+    // 从后端的interval值推导出intervalValue和intervalUnit
+    let intervalValue = task.intervalValue || task.interval;
+    let intervalUnit = task.intervalUnit || 'hours';
+    
+    // 如果没有保存的单位信息，根据interval值推导
+    if (!task.intervalValue && !task.intervalUnit) {
+      const hours = task.interval;
+      if (hours < 1) {
+        // 小于1小时，转换为分钟
+        intervalValue = Math.round(hours * 60);
+        intervalUnit = 'minutes';
+      } else if (hours >= 24 && hours % 24 === 0) {
+        // 整数天，转换为天数
+        intervalValue = hours / 24;
+        intervalUnit = 'days';
+      } else {
+        // 保持小时
+        intervalValue = hours;
+        intervalUnit = 'hours';
+      }
+    }
+    
+    backupForm.setFieldsValue({
+      name: task.name,
+      directory: task.directory,
+      intervalValue: intervalValue,
+      intervalUnit: intervalUnit,
+      keepCount: task.keepCount
+    });
+    setBackupModalVisible(true);
+  };
+
+  const handleDeleteBackupTask = async (taskId: string) => {
+    try {
+      const response = await axios.delete(`/api/backup/tasks/${taskId}`);
+      if (response.data.status === 'success') {
+        message.success('备份任务已删除');
+        refreshBackupTasks();
+      }
+    } catch (error) {
+      console.error('删除备份任务失败:', error);
+      message.error('删除备份任务失败');
+    }
+  };
+
+  const handleBackupFormSubmit = async (values: any) => {
+    try {
+      const url = editingBackupTask 
+        ? `/api/backup/tasks/${editingBackupTask.id}` 
+        : '/api/backup/tasks';
+      const method = editingBackupTask ? 'put' : 'post';
+      
+      // 转换时间单位为小时
+      let intervalInHours = values.intervalValue;
+      if (values.intervalUnit === 'minutes') {
+        intervalInHours = values.intervalValue / 60;
+      } else if (values.intervalUnit === 'days') {
+        intervalInHours = values.intervalValue * 24;
+      }
+      
+      // 构建发送给后端的数据
+      const submitData = {
+        ...values,
+        interval: intervalInHours,
+        intervalValue: values.intervalValue,
+        intervalUnit: values.intervalUnit
+      };
+      
+      const response = await axios[method](url, submitData);
+      if (response.data.status === 'success') {
+        message.success(editingBackupTask ? '备份任务已更新' : '备份任务已创建');
+        setBackupModalVisible(false);
+        setEditingBackupTask(null);
+        backupForm.resetFields();
+        refreshBackupTasks();
+      }
+    } catch (error) {
+      console.error('保存备份任务失败:', error);
+      message.error('保存备份任务失败');
+    }
+  };
+
   // 初始化
   useEffect(() => {
     // 如果已登录，加载游戏列表
@@ -3016,6 +3147,89 @@ const checkServerStatus = async (gameId: string) => {
                     )}
                   </Row>
                 </TabPane>
+                <TabPane tab="定时备份" key="backup">
+                  <div className="backup-management">
+                    <div className="backup-controls">
+                      <Button onClick={refreshBackupTasks} icon={<ReloadOutlined />} style={{marginRight: 8}}>刷新任务</Button>
+                      <Button type="primary" onClick={() => setBackupModalVisible(true)}>添加备份任务</Button>
+                    </div>
+                    <Row gutter={[16, 16]}>
+                      {backupTasks.map(task => (
+                        <Col key={task.id} xs={24} sm={12} md={8} lg={6}>
+                          <Card
+                            title={task.name}
+                            extra={
+                              <Tag color={task.enabled ? "green" : "default"}>
+                                {task.enabled ? "启用" : "禁用"}
+                              </Tag>
+                            }
+                            style={{ borderRadius: '8px', overflow: 'hidden' }}
+                          >
+                            <div style={{marginBottom: 12}}>
+                              <p>目录: {task.directory}</p>
+                              <p>间隔: {(() => {
+                                if (task.intervalValue && task.intervalUnit) {
+                                  const unitMap = {
+                                    'minutes': '分钟',
+                                    'hours': '小时', 
+                                    'days': '天'
+                                  };
+                                  return `${task.intervalValue}${unitMap[task.intervalUnit] || '小时'}`;
+                                } else {
+                                  // 兼容旧数据
+                                  const hours = task.interval;
+                                  if (hours < 1) {
+                                    return `${Math.round(hours * 60)}分钟`;
+                                  } else if (hours >= 24 && hours % 24 === 0) {
+                                    return `${hours / 24}天`;
+                                  } else {
+                                    return `${hours}小时`;
+                                  }
+                                }
+                              })()}</p>
+                              <p>保留: {task.keepCount}份</p>
+                              <p>下次备份: {task.nextBackup || '未设置'}</p>
+                            </div>
+                            <div style={{display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px'}}>
+                              <Button 
+                                size="small"
+                                onClick={() => handleToggleBackupTask(task.id)}
+                              >
+                                {task.enabled ? '禁用' : '启用'}
+                              </Button>
+                              <Button 
+                                size="small"
+                                onClick={() => handleRunBackupNow(task.id)}
+                              >
+                                立即备份
+                              </Button>
+                              <Button 
+                                size="small"
+                                onClick={() => handleEditBackupTask(task)}
+                              >
+                                编辑
+                              </Button>
+                              <Button 
+                                danger
+                                size="small"
+                                onClick={() => handleDeleteBackupTask(task.id)}
+                              >
+                                删除
+                              </Button>
+                            </div>
+                          </Card>
+                        </Col>
+                      ))}
+                      {backupTasks.length === 0 && (
+                        <Col span={24}>
+                          <div className="empty-backup-tasks">
+                            <p>暂无备份任务，点击"添加备份任务"创建新任务</p>
+                          </div>
+                        </Col>
+                      )}
+                    </Row>
+                  </div>
+                </TabPane>
               </Tabs>
             </div>
           )}
@@ -3376,6 +3590,121 @@ const checkServerStatus = async (gameId: string) => {
         )}
       </Modal>
       
+      {/* 备份任务Modal */}
+      <Modal
+        title={editingBackupTask ? '编辑备份任务' : '添加备份任务'}
+        open={backupModalVisible}
+        onCancel={() => {
+          setBackupModalVisible(false);
+          setEditingBackupTask(null);
+          backupForm.resetFields();
+        }}
+        footer={null}
+        width={isMobile ? "95%" : 600}
+      >
+        <Form
+          form={backupForm}
+          layout="vertical"
+          onFinish={handleBackupFormSubmit}
+          style={{ marginTop: 20 }}
+        >
+          <Form.Item
+            name="name"
+            label="任务名称"
+            rules={[{ required: true, message: '请输入任务名称' }]}
+          >
+            <Input placeholder="例如：我的世界服务器备份" />
+          </Form.Item>
+          
+          <Form.Item
+            name="directory"
+            label="备份目录"
+            rules={[{ required: true, message: '请输入要备份的目录路径' }]}
+          >
+            <Input placeholder="例如：/home/steam/games/minecraft" />
+          </Form.Item>
+          
+          <Form.Item label="备份间隔">
+            <Input.Group compact>
+              <Form.Item
+                name="intervalValue"
+                style={{ width: '70%', marginBottom: 0 }}
+                rules={[
+                  { required: true, message: '请输入备份间隔' },
+                  { 
+                    validator: (_, value) => {
+                      const num = Number(value);
+                      if (!value || isNaN(num) || num < 1) {
+                        return Promise.reject(new Error('间隔时间至少为1'));
+                      }
+                      return Promise.resolve();
+                    }
+                  }
+                ]}
+              >
+                <Input type="number" placeholder="例如：6" />
+              </Form.Item>
+              <Form.Item
+                name="intervalUnit"
+                style={{ width: '30%', marginBottom: 0 }}
+                initialValue="hours"
+              >
+                <Select>
+                  <Select.Option value="minutes">分钟</Select.Option>
+                  <Select.Option value="hours">小时</Select.Option>
+                  <Select.Option value="days">天</Select.Option>
+                </Select>
+              </Form.Item>
+            </Input.Group>
+          </Form.Item>
+          
+          <Form.Item
+            name="keepCount"
+            label="保留份数"
+            rules={[
+              { required: true, message: '请输入保留份数' },
+              { 
+                validator: (_, value) => {
+                  const num = Number(value);
+                  if (!value || isNaN(num) || num < 1) {
+                    return Promise.reject(new Error('至少保留1份备份'));
+                  }
+                  return Promise.resolve();
+                }
+              }
+            ]}
+          >
+            <Input type="number" placeholder="例如：7" addonAfter="份" />
+          </Form.Item>
+          
+          <div style={{ textAlign: 'center', marginTop: 24 }}>
+            <Button 
+              type="default" 
+              style={{ marginRight: 8 }}
+              onClick={() => {
+                setBackupModalVisible(false);
+                setEditingBackupTask(null);
+                backupForm.resetFields();
+              }}
+            >
+              取消
+            </Button>
+            <Button type="primary" htmlType="submit">
+              {editingBackupTask ? '更新任务' : '创建任务'}
+            </Button>
+          </div>
+        </Form>
+        
+        <div style={{ marginTop: 20, padding: 16, backgroundColor: '#f6f8fa', borderRadius: 6 }}>
+          <p style={{ margin: 0, fontSize: 12, color: '#666' }}>
+            <strong>说明：</strong><br/>
+            • 备份文件将保存到 /home/steam/backup/任务名称/ 目录<br/>
+            • 使用tar格式进行归档压缩<br/>
+            • 自动删除超出保留份数的旧备份文件
+          </p>
+        </div>
+      </Modal>
+      
       {/* 文件管理器Modal - THIS IS THE NESTED WINDOW */}
       <Modal
         title={`游戏文件管理 - ${fileManagerPath.split('/').pop() || ''}`} // Dynamic title based on path
@@ -3415,4 +3744,4 @@ const checkServerStatus = async (gameId: string) => {
   );
 };
 
-export default App; 
+export default App;
