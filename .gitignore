@@ -23,7 +23,6 @@ var/
 # JWT配置文件
 server/config.json
 docs/
-frp/
 
 # 日志文件
 *.log
@@ -38,3 +37,6 @@ logs/
 # 系统文件
 .DS_Store
 Thumbs.db 
+
+# 其它
+frp/
