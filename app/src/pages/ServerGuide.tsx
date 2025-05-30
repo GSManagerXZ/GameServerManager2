@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Typography, Card, Row, Col, Button, Space, Tooltip, message } from 'antd';
+import React, { useState, useMemo } from 'react';
+import { Typography, Card, Row, Col, Button, Space, Tooltip, message, Tag } from 'antd';
 
 const { Title, Paragraph } = Typography;
 
@@ -13,6 +13,7 @@ interface SiteInfo {
 
 const ServerGuide: React.FC = () => {
   const [hoveredSite, setHoveredSite] = useState<number | null>(null);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   
   // 导航站点数据
   const sites: SiteInfo[] = [
@@ -78,6 +79,41 @@ const ServerGuide: React.FC = () => {
     }
   ];
 
+  // 收集所有可用标签
+  const allTags = useMemo(() => {
+    const tagsSet = new Set<string>();
+    sites.forEach(site => {
+      site.tags?.forEach(tag => tagsSet.add(tag));
+    });
+    return Array.from(tagsSet).sort();
+  }, [sites]);
+
+  // 处理标签点击
+  const handleTagClick = (tag: string) => {
+    setSelectedTags(prev => {
+      if (prev.includes(tag)) {
+        return prev.filter(t => t !== tag);
+      } else {
+        return [...prev, tag];
+      }
+    });
+  };
+
+  // 清除所有筛选
+  const clearFilters = () => {
+    setSelectedTags([]);
+  };
+
+  // 筛选站点
+  const filteredSites = useMemo(() => {
+    if (selectedTags.length === 0) {
+      return sites;
+    }
+    return sites.filter(site => 
+      selectedTags.some(tag => site.tags?.includes(tag))
+    );
+  }, [sites, selectedTags]);
+
   // 跳转到外部链接
   const handleOpenSite = (url: string, name: string) => {
     window.open(url, '_blank');
@@ -91,44 +127,80 @@ const ServerGuide: React.FC = () => {
         这里提供了各种游戏服务器部署和配置的有用资源。点击任意卡片跳转到相应网站获取详细指南。
       </Paragraph>
       
-      <Row gutter={[16, 16]}>
-        {sites.map((site, index) => (
-          <Col xs={24} sm={12} md={8} lg={6} key={index}>
-            <Card 
-              hoverable 
-              className="site-card"
-              onClick={() => handleOpenSite(site.url, site.name)}
-              onMouseEnter={() => setHoveredSite(index)}
-              onMouseLeave={() => setHoveredSite(null)}
+      <div className="filter-tags-container">
+        <div className="filter-tags-header">
+          <span className="filter-title">标签筛选：</span>
+          {selectedTags.length > 0 && (
+            <Button size="small" onClick={clearFilters} style={{ marginLeft: 8 }}>
+              清除筛选
+            </Button>
+          )}
+        </div>
+        <div className="filter-tags">
+          {allTags.map(tag => (
+            <Tag
+              key={tag}
+              color={selectedTags.includes(tag) ? "#1890ff" : "default"}
+              onClick={() => handleTagClick(tag)}
+              style={{ cursor: 'pointer', margin: '4px' }}
             >
-              <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                <div className="site-card-title">
-                  <Typography.Title level={4}>{site.name}</Typography.Title>
-                </div>
-                
-                {site.tags && (
-                  <div className="site-card-tags">
-                    {site.tags.map((tag, tagIndex) => (
-                      <span className="site-tag" key={tagIndex}>{tag}</span>
-                    ))}
+              {tag}
+            </Tag>
+          ))}
+        </div>
+      </div>
+      
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        {filteredSites.length > 0 ? (
+          filteredSites.map((site, index) => (
+            <Col xs={24} sm={12} md={8} lg={6} key={index}>
+              <Card 
+                hoverable 
+                className="site-card"
+                onClick={() => handleOpenSite(site.url, site.name)}
+                onMouseEnter={() => setHoveredSite(index)}
+                onMouseLeave={() => setHoveredSite(null)}
+              >
+                <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                  <div className="site-card-title">
+                    <Typography.Title level={4}>{site.name}</Typography.Title>
                   </div>
-                )}
-                
-                <Paragraph ellipsis={{ rows: 3 }}>{site.description}</Paragraph>
-                
-                <Tooltip title="点击访问站点">
-                  <Button 
-                    type="primary" 
-                    block
-                    className={hoveredSite === index ? 'btn-animated' : ''}
-                  >
-                    访问站点
-                  </Button>
-                </Tooltip>
-              </Space>
-            </Card>
+                  
+                  {site.tags && (
+                    <div className="site-card-tags">
+                      {site.tags.map((tag, tagIndex) => (
+                        <span 
+                          className={`site-tag ${selectedTags.includes(tag) ? 'site-tag-selected' : ''}`} 
+                          key={tagIndex}
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  
+                  <Paragraph ellipsis={{ rows: 3 }}>{site.description}</Paragraph>
+                  
+                  <Tooltip title="点击访问站点">
+                    <Button 
+                      type="primary" 
+                      block
+                      className={hoveredSite === index ? 'btn-animated' : ''}
+                    >
+                      访问站点
+                    </Button>
+                  </Tooltip>
+                </Space>
+              </Card>
+            </Col>
+          ))
+        ) : (
+          <Col span={24}>
+            <div className="empty-sites">
+              <p>没有符合筛选条件的站点</p>
+            </div>
           </Col>
-        ))}
+        )}
       </Row>
     </div>
   );

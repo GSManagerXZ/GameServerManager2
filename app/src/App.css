@@ -2689,6 +2689,11 @@ input#sponsorKey.ant-input {
   font-weight: 500;
 }
 
+.server-guide-container .site-tag-selected {
+  background-color: #1890ff;
+  color: #ffffff;
+}
+
 .server-guide-container .ant-typography.ant-typography-ellipsis {
   color: #666;
   font-size: 14px;
@@ -2707,6 +2712,40 @@ input#sponsorKey.ant-input {
   transform: scale(1.03);
 }
 
+/* 筛选标签容器样式 */
+.filter-tags-container {
+  margin-bottom: 16px;
+  padding: 16px;
+  background-color: #f9f9f9;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.filter-tags-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.filter-title {
+  font-weight: 500;
+  font-size: 15px;
+  color: #333;
+}
+
+.filter-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.empty-sites {
+  text-align: center;
+  padding: 40px 0;
+  color: #999;
+  font-size: 16px;
+}
+
 /* 移动端样式适配 */
 @media (max-width: 768px) {
   .server-guide-container .site-card {
@@ -2721,6 +2760,14 @@ input#sponsorKey.ant-input {
   
   .server-guide-container .site-card-title h4 {
     font-size: 16px;
+  }
+  
+  .filter-tags-container {
+    padding: 12px;
+  }
+  
+  .filter-title {
+    font-size: 14px;
   }
 }
 
@@ -2751,5 +2798,19 @@ input#sponsorKey.ant-input {
   
   .server-guide-container .ant-typography.ant-typography-ellipsis {
     font-size: 12px;
+  }
+  
+  .filter-tags-container {
+    padding: 8px;
+  }
+  
+  .filter-tags-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .filter-tags-header button {
+    margin-left: 0;
+    margin-top: 8px;
   }
 }
