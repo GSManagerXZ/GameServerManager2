@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Progress, message, Tabs, List, Typography, Tag, Tooltip, Alert } from 'antd';
-import { CloudDownloadOutlined, CheckCircleOutlined, CloseCircleOutlined, InfoCircleOutlined } from '@ant-design/icons';
+import { Card, Button, Progress, message, Tabs, List, Typography, Tag, Tooltip, Alert, Modal } from 'antd';
+import { CloudDownloadOutlined, CheckCircleOutlined, CloseCircleOutlined, InfoCircleOutlined, DeleteOutlined } from '@ant-design/icons';
 import axios from 'axios';
 
 const { TabPane } = Tabs;
 const { Title, Paragraph, Text } = Typography;
+const { confirm } = Modal;
 
 // Java版本类型定义
 interface JavaVersion {
@@ -76,6 +77,38 @@ const Environment: React.FC = () => {
       console.error('安装Java失败:', error);
       message.error(error?.response?.data?.message || '安装失败');
     }
+  };
+
+  // 卸载Java
+  const uninstallJava = async (versionId: string, versionName: string) => {
+    confirm({
+      title: `确定要卸载 ${versionName} 吗?`,
+      content: '卸载后，所有使用此Java版本的应用可能无法正常运行。',
+      okText: '确认卸载',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          const response = await axios.post('/api/environment/java/uninstall', { version: versionId });
+          if (response.data.status === 'success') {
+            message.success(response.data.message);
+            // 刷新Java版本列表
+            fetchJavaVersions();
+            // 清除进度信息
+            setJavaProgress(prev => {
+              const newProgress = { ...prev };
+              delete newProgress[versionId];
+              return newProgress;
+            });
+          } else {
+            message.error(response.data.message || '卸载失败');
+          }
+        } catch (error: any) {
+          console.error('卸载Java失败:', error);
+          message.error(error?.response?.data?.message || '卸载失败');
+        }
+      }
+    });
   };
 
   // 轮询Java安装进度
@@ -237,8 +270,20 @@ const Environment: React.FC = () => {
                       >
                         {item.installed ? "已安装" : "安装"}
                       </Button>
-                    </Tooltip>
-                  ]}
+                    </Tooltip>,
+                    item.installed && (
+                      <Tooltip title="卸载">
+                        <Button 
+                          type="default" 
+                          danger
+                          icon={<DeleteOutlined />}
+                          onClick={() => uninstallJava(item.id, item.name)}
+                        >
+                          卸载
+                        </Button>
+                      </Tooltip>
+                    )
+                  ].filter(Boolean)}
                 >
                   <List.Item.Meta
                     title={

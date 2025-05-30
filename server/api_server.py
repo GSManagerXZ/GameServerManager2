@@ -5756,6 +5756,59 @@ def get_java_versions():
             "message": str(e)
         }), 500
 
+# 卸载Java的函数
+def uninstall_java(version="jdk8"):
+    """卸载指定版本的Java"""
+    if version not in JAVA_VERSIONS:
+        return False, f"不支持的Java版本: {version}，支持的版本有: {', '.join(JAVA_VERSIONS.keys())}"
+    
+    java_dir = JAVA_VERSIONS[version]["dir"]
+    
+    # 检查是否已安装
+    installed, _ = check_java_installation(version)
+    if not installed:
+        return False, f"{JAVA_VERSIONS[version]['display_name']}未安装"
+    
+    try:
+        # 删除Java安装目录
+        if os.path.exists(java_dir):
+            shutil.rmtree(java_dir)
+            logger.info(f"{JAVA_VERSIONS[version]['display_name']}卸载成功")
+            return True, f"{JAVA_VERSIONS[version]['display_name']}卸载成功"
+        else:
+            return False, f"{JAVA_VERSIONS[version]['display_name']}安装目录不存在"
+    except Exception as e:
+        logger.error(f"卸载Java时出错: {str(e)}")
+        return False, f"卸载Java时出错: {str(e)}"
+
+@app.route('/api/environment/java/uninstall', methods=['POST'])
+@auth_required
+def uninstall_java_route():
+    """卸载Java"""
+    try:
+        data = request.get_json()
+        version = data.get('version', 'jdk8')
+        
+        # 卸载Java
+        success, message = uninstall_java(version)
+        
+        if success:
+            return jsonify({
+                "status": "success",
+                "message": message
+            })
+        else:
+            return jsonify({
+                "status": "error",
+                "message": message
+            }), 400
+    except Exception as e:
+        logger.error(f"卸载Java时出错: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
 if __name__ == '__main__':
     logger.warning("检测到直接运行api_server.py")
     logger.warning("======================================================")
