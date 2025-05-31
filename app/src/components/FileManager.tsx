@@ -117,6 +117,7 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', 
   // 添加状态来跟踪文件是否被修改
   const [isFileModified, setIsFileModified] = useState<boolean>(false);
   const [originalContent, setOriginalContent] = useState<string>('');
+  const originalContentRef = useRef<string>('');
   // 文件编码相关状态
   const [fileEncoding, setFileEncoding] = useState<string>('utf-8');
   const [availableEncodings] = useState<{value: string, label: string}[]>([
@@ -147,6 +148,7 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', 
   useEffect(() => { currentPathRef.current = currentPath; }, [currentPath]);
   useEffect(() => { selectedFileRef.current = selectedFile; }, [selectedFile]);
   useEffect(() => { fileContentRef.current = fileContent; }, [fileContent]);
+  useEffect(() => { originalContentRef.current = originalContent; }, [originalContent]);
   useEffect(() => { syntaxErrorsRef.current = syntaxErrors; }, [syntaxErrors]);
   
   useEffect(() => { 
@@ -1458,7 +1460,8 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', 
     // 监听编辑器内容变化
     editor.onDidChangeModelContent(() => {
       const currentContent = editor.getValue();
-      setIsFileModified(currentContent !== originalContent);
+      setFileContent(currentContent);
+      setIsFileModified(currentContent !== originalContentRef.current);
     });
   };
 
@@ -2092,7 +2095,6 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', 
               height="100%"
               defaultLanguage={selectedFile ? getFileLanguage(selectedFile.name) : 'plaintext'}
               value={fileContent}
-              onChange={(value) => setFileContent(value || '')}
               onMount={handleEditorDidMount}
               theme="vs-dark"
               options={{
