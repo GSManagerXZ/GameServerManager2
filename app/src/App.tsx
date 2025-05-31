@@ -6,6 +6,7 @@ import axios from 'axios';
 import 'antd/dist/antd.css';
 import './App.css';
 import Terminal from './components/Terminal';
+import SimpleServerTerminal from './components/SimpleServerTerminal';
 import ContainerInfo from './components/ContainerInfo';
 import FileManager from './components/FileManager';
 import Register from './components/Register'; // 导入注册组件
@@ -232,16 +233,6 @@ const stopServer = async (gameId: string, force: boolean = false) => {
 
 const sendServerInput = async (gameId: string, value: string) => {
   try {
-    // 先检查服务器状态
-    const statusCheck = await checkServerStatus(gameId);
-    if (statusCheck.server_status !== 'running') {
-      return {
-        status: 'error',
-        message: '服务器未运行，无法发送命令',
-        server_status: 'stopped'
-      };
-    }
-    
     // 发送命令
     const response = await axios.post('/api/server/send_input', {
       game_id: gameId,
@@ -252,11 +243,16 @@ const sendServerInput = async (gameId: string, value: string) => {
     if (error.response && error.response.status === 400) {
       return {
         status: 'error',
-        message: '服务器未运行或已停止，请重新启动服务器',
+        message: error.response.data.message || '服务器未运行或已停止，请重新启动服务器',
         server_status: 'stopped'
       };
     }
-    throw error;
+    // 对于其他类型的错误 (例如网络错误)，直接抛出或返回一个包含错误信息的标准对象
+     return {
+        status: 'error',
+        message: error.message || '发送命令时发生未知网络或服务器错误',
+        server_status: 'unknown' 
+     };
   }
 };
 
@@ -283,6 +279,7 @@ const checkServerStatus = async (gameId: string) => {
   const [accountModalVisible, setAccountModalVisible] = useState(false);
   const [accountForm] = Form.useForm();
   const [pendingInstallGame, setPendingInstallGame] = useState<GameInfo | null>(null);
+  const [accountModalLoading, setAccountModalLoading] = useState<boolean>(false);
   // 新增游戏详情对话框状态
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [detailGame, setDetailGame] = useState<GameInfo | null>(null);
@@ -480,31 +477,9 @@ const checkServerStatus = async (gameId: string) => {
     try {
       if (!gameId || !input.trim()) return;
       
-      // console.log(`发送服务器命令: gameId=${gameId}, input=${input}`);
-      
-      // 先检查服务器是否在运行
-      try {
-        const statusResponse = await checkServerStatus(gameId);
-        if (statusResponse.server_status !== 'running') {
-          message.error('服务器未运行，请先启动服务器');
-          // 从运行中的服务器列表中移除
-          setRunningServers(prev => prev.filter(id => id !== gameId));
-          return;
-        }
-      } catch (statusError) {
-        console.error(`检查服务器状态失败: ${statusError}`);
-        message.error('无法确认服务器状态，请刷新页面后重试');
-        return;
-      }
-      
-      // 保存到输入历史
-      setInputHistory(prev => [...prev, input]);
-      setInputHistoryIndex(-1);
-      
       // 添加到输出，以便用户可以看到自己的输入
       setServerOutputs(prev => {
         const oldOutput = prev[gameId] || [];
-        // console.log(`添加命令到输出: gameId=${gameId}, 当前输出行数=${oldOutput.length}`);
         return {
           ...prev,
           [gameId]: [...oldOutput, `> ${input}`]
@@ -512,13 +487,15 @@ const checkServerStatus = async (gameId: string) => {
       });
       
       // 发送输入到服务器
-      // console.log(`调用API发送命令: gameId=${gameId}`);
       const response = await sendServerInput(gameId, input);
-      // console.log(`发送命令响应:`, response);
       
       if (response.status !== 'success') {
         console.error(`发送命令失败: ${response.message}`);
         message.error(`发送命令失败: ${response.message}`);
+        // 如果发送失败是因为服务器停止了，这里可以更新状态
+        if (response.server_status === 'stopped') {
+           setRunningServers(prev => prev.filter(id => id !== gameId));
+        }
       }
     } catch (error: any) {
       console.error(`发送命令异常: ${error}`);
@@ -3453,166 +3430,92 @@ const checkServerStatus = async (gameId: string) => {
         width={isMobile ? "95%" : 1200}
       >
         <div className="server-console">
-          <div className="terminal-container">
-            {/* 终端头部工具栏 */}
-            <div className="terminal-header">
-              <div className="terminal-info">
-                <span>输出日志: {(serverOutputs[selectedServerGame?.id] || []).filter(line => !line.includes('等待服务器输出...')).length} 行</span>
-                {(serverOutputs[selectedServerGame?.id] || []).filter(line => !line.includes('等待服务器输出...')).length > 20 && (
-                  <span className="terminal-status">（显示最新 20 行）</span>
-                )}
-              </div>
-              <div className="terminal-actions">
-                {(serverOutputs[selectedServerGame?.id] || []).filter(line => !line.includes('等待服务器输出...')).length > 20 && (
-                  <Button 
-                    type="link" 
-                    size="small" 
-                    icon={<HistoryOutlined />}
-                    onClick={() => {
-                      const allOutput = (serverOutputs[selectedServerGame?.id] || []).filter(line => !line.includes('等待服务器输出...'));
-                      Modal.info({
-                        title: `${selectedServerGame?.name || ''} 完整历史输出`,
-                        content: (
-                          <div className="terminal-history-modal">
-                            <div className="terminal-history-content">
-                              {allOutput.map((line, index) => {
-                                let lineClass = "terminal-history-line";
-                                let lineContent = line;
-                                
-                                // 检查是否为特殊类型的输出
-                                if (typeof line === 'string') {
-                                  if (line.includes('===')) {
-                                    lineClass += " section-header";
-                                  } else if (line.includes('[文件]') || line.includes('[文件输出]')) {
-                                    lineClass += " file-output";
-                                  } else if (line.includes('[心跳检查]')) {
-                                    lineClass += " heartbeat-output";
-                                  } else if (line.startsWith('>')) {
-                                    lineClass += " command-input";
-                                  }
-                                }
-                                
-                                return (
-                                  <div key={index} className={lineClass}>
-                                    <span className="line-number">{index + 1}</span>
-                                    <span className="line-content">{lineContent}</span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        ),
-                        width: 800,
-                        okText: '关闭'
-                      });
-                    }}
-                  >
-                    查看历史输出
-                  </Button>
-                )}
-              </div>
-            </div>
-            <div className="terminal-output">
-              {(() => {
-                const allOutput = (serverOutputs[selectedServerGame?.id] || [])
-                  .filter(line => !line.includes('等待服务器输出...'));
-                const displayOutput = allOutput.length > 20 ? allOutput.slice(-20) : allOutput;
-                
-                return displayOutput.map((line, index) => {
-                  // 处理不同类型的输出行
-                  let lineClass = "terminal-line";
-                  let lineContent = line;
+          <SimpleServerTerminal
+            outputs={(serverOutputs[selectedServerGame?.id] || []).filter(line => !line.includes('等待服务器输出...'))}
+            onSendCommand={async (command) => {
+              console.log('[App.tsx] onSendCommand triggered. Command:', command, 'Selected Game ID:', selectedServerGame?.id); // 新增日志1
+
+              if (selectedServerGame?.id) {
+                try {
+                  console.log('[App.tsx] Checking server status for game ID:', selectedServerGame.id); // 新增日志2
+                  const statusResponse = await checkServerStatus(selectedServerGame.id);
+                  console.log('[App.tsx] Server status response:', statusResponse); // 新增日志3
+
+                  if (statusResponse.server_status !== 'running') {
+                    message.error('服务器未运行，无法发送命令');
+                    console.log('[App.tsx] Server not running or status check failed. Status:', statusResponse.server_status); // 新增日志4
+                    return;
+                  }
+
+                  console.log('[App.tsx] Server is running. Calling handleSendServerInput for game ID:', selectedServerGame.id); // 新增日志5
+                  handleSendServerInput(selectedServerGame.id, command);
                   
-                  // 检查是否为特殊类型的输出
-                  if (typeof line === 'string') {
-                    if (line.includes('===')) {
-                      lineClass += " section-header";
-                    } else if (line.includes('[文件]') || line.includes('[文件输出]')) {
-                      lineClass += " file-output";
-                    } else if (line.includes('[心跳检查]')) {
-                      lineClass += " heartbeat-output";
-                    } else if (line.startsWith('>')) {
-                      lineClass += " command-input";
-                    }
-                  }
+                  // 添加到历史记录
+                  setInputHistory(prev => {
+                    const newHistory = [...prev, command];
+                    return newHistory.slice(-50); // 保留最近50条
+                  });
+                  setInputHistoryIndex(-1);
+                } catch (error) {
+                  console.error('[App.tsx] Error in onSendCommand during status check or sending:', error); // 修改日志6
+                  message.error('无法确认服务器状态或发送命令时出错，请刷新页面后重试');
                   
-                  return (
-                    <div 
-                      key={allOutput.length > 20 ? allOutput.length - 20 + index : index} 
-                      className={lineClass}
-                    >
-                      {lineContent}
-                    </div>
-                  );
-                });
-              })()}
-              <div ref={terminalEndRef} className="terminal-end-ref" />
-            </div>
-          </div>
-          <div className="terminal-input">
-            <Input.Search
-              placeholder="输入命令..."
-              enterButton="发送"
-              value={serverInput}
-              onChange={(e) => setServerInput(e.target.value)}
-              onSearch={async value => {
-                if (value.trim()) {
-                  // 在发送命令前先检查服务器状态
-                  try {
-                    const statusResponse = await checkServerStatus(selectedServerGame?.id);
-                    if (statusResponse.server_status !== 'running') {
-                      message.error('服务器未运行，无法发送命令');
-                      // 添加警告信息到终端
-                      setServerOutputs(prev => {
-                        const oldOutput = prev[selectedServerGame?.id] || [];
-                        return {
-                          ...prev,
-                          [selectedServerGame?.id]: [...oldOutput, "错误: 服务器未运行，请先启动服务器"]
-                        };
-                      });
-                      
-                      // 从运行中的服务器列表中移除
-                      if (selectedServerGame?.id) {
-                        setRunningServers(prev => prev.filter(id => id !== selectedServerGame.id));
-                      }
-                      return;
-                    }
-                    
-                    // 服务器在运行，发送命令
-                    handleSendServerInput(selectedServerGame?.id, value);
-                    setServerInput('');
-                  } catch (error) {
-                    console.error('检查服务器状态失败:', error);
-                    message.error('无法确认服务器状态，请刷新页面后重试');
-                    
-                    // 发生错误时也从运行中的服务器列表中移除
-                    if (selectedServerGame?.id) {
-                      setRunningServers(prev => prev.filter(id => id !== selectedServerGame.id));
-                    }
+                  // 发生错误时也从运行中的服务器列表中移除
+                  if (selectedServerGame?.id) {
+                    setRunningServers(prev => prev.filter(id => id !== selectedServerGame.id));
                   }
+                  return;
                 }
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'ArrowUp') {
-                  // 实现历史命令功能
-                  if (inputHistory.length > 0 && inputHistoryIndex < inputHistory.length - 1) {
-                    setInputHistoryIndex(prev => prev + 1);
-                    setServerInput(inputHistory[inputHistory.length - 1 - inputHistoryIndex - 1]);
-                  }
-                } else if (e.key === 'ArrowDown') {
-                  if (inputHistoryIndex > 0) {
-                    setInputHistoryIndex(prev => prev - 1);
-                    setServerInput(inputHistory[inputHistory.length - 1 - inputHistoryIndex + 1]);
-                  } else {
-                    setInputHistoryIndex(-1);
-                    setServerInput('');
-                  }
-                }
-              }}
-            />
-          </div>
+              } else {
+                console.log('[App.tsx] onSendCommand: selectedServerGame or selectedServerGame.id is null/undefined.'); // 新增日志7
+              }
+            }}
+            onClear={() => {
+              if (selectedServerGame?.id) {
+                setServerOutputs(prev => ({
+                  ...prev,
+                  [selectedServerGame.id]: []
+                }));
+              }
+            }}
+            onReconnect={() => {
+              if (selectedServerGame?.id) {
+                handleStartServer(selectedServerGame.id, true);
+              }
+            }}
+            style={{ height: '600px' }}
+          />
         </div>
       </Modal>
+
+      {/* 账号输入Modal */}
+      <Modal
+        title="输入Steam账号"
+        open={accountModalVisible}
+        onOk={onAccountModalOk}
+        onCancel={() => {
+          setAccountModalVisible(false);
+          setPendingInstallGame(null);
+        }}
+        confirmLoading={accountModalLoading}
+      >
+        <Form form={accountForm}>
+          <Form.Item
+            name="username"
+            label="Steam用户名"
+            rules={[{ required: true, message: '请输入Steam用户名!' }]}
+          >
+            <Input placeholder="请输入Steam用户名" />
+          </Form.Item>
+          <Form.Item
+            name="password"
+            label="Steam密码"
+            rules={[{ required: true, message: '请输入Steam密码!' }]}
+          >
+            <Input.Password placeholder="请输入Steam密码" />
+           </Form.Item>
+         </Form>
+       </Modal>
 
       {/* 账号输入Modal */}
       <Modal
