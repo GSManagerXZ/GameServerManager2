@@ -32,6 +32,10 @@ const SimpleServerTerminal = forwardRef<SimpleServerTerminalRef, SimpleServerTer
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [cursorPosition, setCursorPosition] = useState({ x: 0, y: 0 });
   const [isTerminalFocused, setIsTerminalFocused] = useState(false);
+  const [fontSize, setFontSize] = useState(13);
+  const [searchIndex, setSearchIndex] = useState(0);
+  const [searchMatches, setSearchMatches] = useState<number[]>([]);
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   // 滚动到底部
   const scrollToBottom = () => {
@@ -44,6 +48,145 @@ const SimpleServerTerminal = forwardRef<SimpleServerTerminalRef, SimpleServerTer
   useEffect(() => {
     scrollToBottom();
   }, [outputs]);
+
+  // 全局快捷键监听
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // 只在终端获得焦点时处理全局快捷键
+      if (!isTerminalFocused && document.activeElement !== terminalRef.current) {
+        return;
+      }
+
+      // Ctrl+F - 打开搜索
+      if (e.ctrlKey && e.key === 'f') {
+        e.preventDefault();
+        setSearchVisible(true);
+        return;
+      }
+
+      // Ctrl+Shift+C - 复制选中文本或全部内容
+      if (e.ctrlKey && e.shiftKey && e.key === 'C') {
+        e.preventDefault();
+        const selection = window.getSelection();
+        if (selection && selection.toString()) {
+          navigator.clipboard.writeText(selection.toString());
+        } else {
+          handleCopyAll();
+        }
+        return;
+      }
+
+      // Ctrl+Shift+V - 粘贴
+      if (e.ctrlKey && e.shiftKey && e.key === 'V') {
+        e.preventDefault();
+        navigator.clipboard.readText().then(text => {
+          setCommandInput(prev => prev + text);
+        }).catch(() => {
+          console.log('无法读取剪贴板内容');
+        });
+        return;
+      }
+
+      // Ctrl+D - 发送EOF或退出
+      if (e.ctrlKey && e.key === 'd') {
+        e.preventDefault();
+        if (commandInput.trim() === '') {
+          if (onSendCommand) {
+            onSendCommand('exit');
+          }
+        } else {
+          setCommandInput('');
+        }
+        return;
+      }
+
+      // Ctrl+A - 全选当前输入
+      if (e.ctrlKey && e.key === 'a') {
+        e.preventDefault();
+        // 这里可以实现全选当前输入的逻辑
+        return;
+      }
+
+      // Ctrl+E - 移动到行尾
+      if (e.ctrlKey && e.key === 'e') {
+        e.preventDefault();
+        // 光标移动到行尾的逻辑
+        return;
+      }
+
+      // Ctrl+U - 清空当前行
+      if (e.ctrlKey && e.key === 'u') {
+        e.preventDefault();
+        setCommandInput('');
+        return;
+      }
+
+      // Ctrl+K - 清空从光标到行尾
+      if (e.ctrlKey && e.key === 'k') {
+        e.preventDefault();
+        setCommandInput('');
+        return;
+      }
+
+      // Ctrl+W - 删除前一个单词
+      if (e.ctrlKey && e.key === 'w') {
+        e.preventDefault();
+        setCommandInput(prev => {
+          const words = prev.trim().split(' ');
+          words.pop();
+          return words.join(' ');
+        });
+        return;
+      }
+
+      // Ctrl+R - 反向搜索历史
+      if (e.ctrlKey && e.key === 'r') {
+        e.preventDefault();
+        showFullHistory();
+        return;
+      }
+
+      // F1 - 显示快捷键帮助
+      if (e.key === 'F1') {
+        e.preventDefault();
+        setShowShortcuts(true);
+        return;
+      }
+
+      // Ctrl+Plus/Minus - 调整字体大小
+      if (e.ctrlKey && (e.key === '=' || e.key === '+')) {
+        e.preventDefault();
+        setFontSize(prev => Math.min(prev + 1, 20));
+        return;
+      }
+      if (e.ctrlKey && e.key === '-') {
+        e.preventDefault();
+        setFontSize(prev => Math.max(prev - 1, 8));
+        return;
+      }
+
+      // Ctrl+0 - 重置字体大小
+      if (e.ctrlKey && e.key === '0') {
+        e.preventDefault();
+        setFontSize(13);
+        return;
+      }
+
+      // Escape - 取消当前操作
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setSearchVisible(false);
+        setCommandInput('');
+        setHistoryIndex(-1);
+        return;
+      }
+    };
+
+    document.addEventListener('keydown', handleGlobalKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleGlobalKeyDown);
+    };
+  }, [isTerminalFocused, commandInput, commandHistory, historyIndex, onSendCommand, onClear]);
 
   // 暴露方法给父组件
   useImperativeHandle(ref, () => ({
@@ -129,8 +272,43 @@ const SimpleServerTerminal = forwardRef<SimpleServerTerminalRef, SimpleServerTer
         onClear();
         setCommandInput(''); // 同时清空输入缓冲区
       }
+    } else if (e.key === 'Tab') {
+      // Tab - 简单的命令补全
+      e.preventDefault();
+      const commonCommands = ['ls', 'cd', 'pwd', 'mkdir', 'rm', 'cp', 'mv', 'cat', 'grep', 'find', 'ps', 'kill', 'top', 'df', 'du', 'chmod', 'chown', 'tar', 'zip', 'unzip', 'wget', 'curl', 'ssh', 'scp', 'rsync', 'git', 'npm', 'node', 'python', 'java', 'docker', 'systemctl', 'service'];
+      const currentInput = commandInput.toLowerCase();
+      const matches = commonCommands.filter(cmd => cmd.startsWith(currentInput));
+      if (matches.length === 1) {
+        setCommandInput(matches[0] + ' ');
+      } else if (matches.length > 1) {
+        // 显示可能的补全选项
+        console.log('可能的补全:', matches);
+      }
+    } else if (e.key === 'Home') {
+      // Home - 移动到行首
+      e.preventDefault();
+      // 这里可以实现光标移动到行首的逻辑
+    } else if (e.key === 'End') {
+      // End - 移动到行尾
+      e.preventDefault();
+      // 这里可以实现光标移动到行尾的逻辑
+    } else if (e.key === 'Delete') {
+      // Delete - 删除光标后的字符
+      e.preventDefault();
+      // 这里可以实现删除光标后字符的逻辑
+    } else if (e.key === 'PageUp') {
+      // Page Up - 向上滚动
+      e.preventDefault();
+      if (terminalRef.current) {
+        terminalRef.current.scrollTop -= terminalRef.current.clientHeight / 2;
+      }
+    } else if (e.key === 'PageDown') {
+      // Page Down - 向下滚动
+      e.preventDefault();
+      if (terminalRef.current) {
+        terminalRef.current.scrollTop += terminalRef.current.clientHeight / 2;
+      }
     }
-    // 可以根据需要添加更多快捷键，例如 Tab 补全等
   };
 
   // 处理终端点击事件（模拟光标定位）
@@ -146,19 +324,43 @@ const SimpleServerTerminal = forwardRef<SimpleServerTerminalRef, SimpleServerTer
   };
 
   // 处理搜索
-  const handleSearch = (term: string) => {
+  const handleSearch = (term: string, direction: 'next' | 'prev' = 'next') => {
     if (!term) return;
     
     const terminalElement = terminalRef.current;
     if (!terminalElement) return;
     
-    // 简单的文本搜索高亮
+    // 查找所有匹配项
     const textContent = terminalElement.textContent || '';
-    const index = textContent.toLowerCase().indexOf(term.toLowerCase());
+    const regex = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    const matches: number[] = [];
+    let match;
     
-    if (index !== -1) {
-      // 这里可以添加更复杂的搜索高亮逻辑
-      console.log('Found search term at index:', index);
+    while ((match = regex.exec(textContent)) !== null) {
+      matches.push(match.index);
+    }
+    
+    setSearchMatches(matches);
+    
+    if (matches.length > 0) {
+      let newIndex;
+      if (direction === 'next') {
+        newIndex = searchIndex >= matches.length - 1 ? 0 : searchIndex + 1;
+      } else {
+        newIndex = searchIndex <= 0 ? matches.length - 1 : searchIndex - 1;
+      }
+      setSearchIndex(newIndex);
+      
+      // 滚动到匹配位置
+      const matchPosition = matches[newIndex];
+      const lines = textContent.substring(0, matchPosition).split('\n');
+      const lineNumber = lines.length - 1;
+      const lineHeight = 16; // 假设行高为16px
+      const scrollPosition = lineNumber * lineHeight;
+      
+      if (terminalElement) {
+        terminalElement.scrollTop = Math.max(0, scrollPosition - terminalElement.clientHeight / 2);
+      }
     }
   };
 
@@ -208,6 +410,54 @@ const SimpleServerTerminal = forwardRef<SimpleServerTerminalRef, SimpleServerTer
     });
   };
 
+  // 显示快捷键帮助
+  const showShortcutsHelp = () => {
+    Modal.info({
+      title: '终端快捷键帮助',
+      content: (
+        <div style={{ 
+          maxHeight: '500px', 
+          overflow: 'auto',
+          fontFamily: 'Consolas, "Courier New", monospace',
+          fontSize: '12px'
+        }}>
+          <h4>基本操作</h4>
+          <p><strong>Enter</strong> - 执行命令</p>
+          <p><strong>↑/↓</strong> - 浏览命令历史</p>
+          <p><strong>Tab</strong> - 命令补全</p>
+          <p><strong>Escape</strong> - 取消当前操作</p>
+          
+          <h4>编辑快捷键</h4>
+          <p><strong>Ctrl+C</strong> - 清空当前输入</p>
+          <p><strong>Ctrl+L</strong> - 清屏</p>
+          <p><strong>Ctrl+U</strong> - 清空整行</p>
+          <p><strong>Ctrl+K</strong> - 清空到行尾</p>
+          <p><strong>Ctrl+W</strong> - 删除前一个单词</p>
+          <p><strong>Ctrl+A</strong> - 移动到行首</p>
+          <p><strong>Ctrl+E</strong> - 移动到行尾</p>
+          <p><strong>Ctrl+D</strong> - 发送EOF/退出</p>
+          
+          <h4>复制粘贴</h4>
+          <p><strong>Ctrl+Shift+C</strong> - 复制选中文本或全部内容</p>
+          <p><strong>Ctrl+Shift+V</strong> - 粘贴</p>
+          
+          <h4>搜索和导航</h4>
+          <p><strong>Ctrl+F</strong> - 打开搜索</p>
+          <p><strong>Ctrl+R</strong> - 搜索历史</p>
+          <p><strong>Page Up/Down</strong> - 滚动页面</p>
+          <p><strong>Home/End</strong> - 移动到行首/行尾</p>
+          
+          <h4>显示控制</h4>
+          <p><strong>Ctrl + +/-</strong> - 调整字体大小</p>
+          <p><strong>Ctrl+0</strong> - 重置字体大小</p>
+          <p><strong>F1</strong> - 显示此帮助</p>
+        </div>
+      ),
+      width: 600,
+      okText: '关闭'
+    });
+  };
+
   return (
     <div className={`simple-server-terminal ${className}`} style={style}>
       {/* 工具栏 */}
@@ -229,6 +479,14 @@ const SimpleServerTerminal = forwardRef<SimpleServerTerminalRef, SimpleServerTer
               icon={<SearchOutlined />}
               onClick={() => setSearchVisible(!searchVisible)}
             />
+          </Tooltip>
+          <Tooltip title="快捷键帮助 (F1)">
+            <Button 
+              size="small" 
+              onClick={showShortcutsHelp}
+            >
+              ?
+            </Button>
           </Tooltip>
           <Tooltip title="查看完整历史">
             <Button 
@@ -268,14 +526,29 @@ const SimpleServerTerminal = forwardRef<SimpleServerTerminalRef, SimpleServerTer
           backgroundColor: '#333',
           borderBottom: '1px solid #444'
         }}>
-          <Input.Search
-            placeholder="搜索终端内容... (Enter搜索下一个，Shift+Enter搜索上一个)"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            onSearch={handleSearch}
-            style={{ maxWidth: 400 }}
-            size="small"
-          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Input.Search
+              placeholder="搜索终端内容... (Enter搜索下一个，Shift+Enter搜索上一个)"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onSearch={(value) => handleSearch(value, 'next')}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && e.shiftKey) {
+                  e.preventDefault();
+                  handleSearch(searchTerm, 'prev');
+                }
+              }}
+              style={{ maxWidth: 300 }}
+              size="small"
+            />
+            {searchMatches.length > 0 && (
+              <span style={{ color: '#f0f0f0', fontSize: '12px' }}>
+                {searchIndex + 1} / {searchMatches.length}
+              </span>
+            )}
+            <Button size="small" onClick={() => handleSearch(searchTerm, 'prev')}>上一个</Button>
+            <Button size="small" onClick={() => handleSearch(searchTerm, 'next')}>下一个</Button>
+          </div>
         </div>
       )}
 
@@ -293,7 +566,7 @@ const SimpleServerTerminal = forwardRef<SimpleServerTerminalRef, SimpleServerTer
           backgroundColor: '#1a1a1a',
           color: '#f0f0f0',
           fontFamily: 'Consolas, "Courier New", monospace',
-          fontSize: '13px',
+          fontSize: `${fontSize}px`,
           padding: '12px',
           cursor: 'text',
           position: 'relative',
@@ -377,7 +650,7 @@ const SimpleServerTerminal = forwardRef<SimpleServerTerminalRef, SimpleServerTer
       }}>
         <Input.Search
           ref={inputRef}
-          placeholder="输入命令... (↑↓键浏览历史，Enter发送，Ctrl+C清空)"
+          placeholder="输入命令... (↑↓键浏览历史，Enter发送)"
           value={commandInput}
           onChange={(e) => setCommandInput(e.target.value)}
           onSearch={handleSendCommand}
@@ -396,7 +669,7 @@ const SimpleServerTerminal = forwardRef<SimpleServerTerminalRef, SimpleServerTer
           display: 'flex',
           justifyContent: 'space-between'
         }}>
-          <span>快捷键: Ctrl+L清屏 | Ctrl+C中断 | Tab补全</span>
+          <span>字体: {fontSize}px</span>
           <span>历史记录: {commandHistory.length} 条</span>
         </div>
       </div>
