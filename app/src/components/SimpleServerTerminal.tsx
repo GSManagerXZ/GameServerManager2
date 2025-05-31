@@ -91,19 +91,24 @@ const SimpleServerTerminal = forwardRef<SimpleServerTerminalRef, SimpleServerTer
     }
   };
 
-  // 处理键盘事件
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  // 新的键盘处理器，用于 terminalRef (主输出区域)
+  const handleTerminalKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    e.preventDefault(); // 阻止默认行为，例如页面滚动
+    setIsTerminalFocused(true); // 确保虚拟光标显示
+
     if (e.key === 'Enter') {
-      // handleSendCommand(); // 移除这行，因为 onSearch 会处理回车
+      handleSendCommand();
+    } else if (e.key === 'Backspace') {
+      setCommandInput(prev => prev.slice(0, -1));
     } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
+      // 向上箭头 - 浏览历史 (与原 handleKeyDown 逻辑类似)
       if (commandHistory.length > 0 && historyIndex < commandHistory.length - 1) {
         const newIndex = historyIndex + 1;
         setHistoryIndex(newIndex);
         setCommandInput(commandHistory[commandHistory.length - 1 - newIndex]);
       }
     } else if (e.key === 'ArrowDown') {
-      e.preventDefault();
+      // 向下箭头 - 浏览历史 (与原 handleKeyDown 逻辑类似)
       if (historyIndex > 0) {
         const newIndex = historyIndex - 1;
         setHistoryIndex(newIndex);
@@ -112,7 +117,20 @@ const SimpleServerTerminal = forwardRef<SimpleServerTerminalRef, SimpleServerTer
         setHistoryIndex(-1);
         setCommandInput('');
       }
+    } else if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      // 处理可打印字符 (忽略控制键、Alt、Meta组合)
+      setCommandInput(prev => prev + e.key);
+    } else if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
+      // Ctrl+C - 清空当前行输入
+      setCommandInput('');
+    } else if (e.ctrlKey && (e.key === 'l' || e.key === 'L')) {
+      // Ctrl+L - 清屏 (如果 onClear prop 存在)
+      if (onClear) {
+        onClear();
+        setCommandInput(''); // 同时清空输入缓冲区
+      }
     }
+    // 可以根据需要添加更多快捷键，例如 Tab 补全等
   };
 
   // 处理终端点击事件（模拟光标定位）
@@ -123,11 +141,7 @@ const SimpleServerTerminal = forwardRef<SimpleServerTerminalRef, SimpleServerTer
       const y = e.clientY - rect.top;
       setCursorPosition({ x, y });
       setIsTerminalFocused(true);
-      
-      // 聚焦到输入框 (注释掉或移除此行以防止自动聚焦)
-      // if (inputRef.current) {
-      //   inputRef.current.focus();
-      // }
+      terminalRef.current?.focus(); // 点击时让主输出区域获得焦点
     }
   };
 
@@ -269,6 +283,8 @@ const SimpleServerTerminal = forwardRef<SimpleServerTerminalRef, SimpleServerTer
       <div 
         ref={terminalRef}
         onClick={handleTerminalClick}
+        onKeyDown={handleTerminalKeyDown}
+        tabIndex={0}
         style={{ 
           flex: 1,
           minHeight: '400px',
@@ -365,9 +381,11 @@ const SimpleServerTerminal = forwardRef<SimpleServerTerminalRef, SimpleServerTer
           value={commandInput}
           onChange={(e) => setCommandInput(e.target.value)}
           onSearch={handleSendCommand}
-          onKeyDown={handleKeyDown}
-          onFocus={() => setIsTerminalFocused(true)}
-          onBlur={() => setIsTerminalFocused(false)}
+          onFocus={() => setIsTerminalFocused(false)}
+          onBlur={() => {
+            // 如果希望焦点离开 Input.Search 后，主终端区域能重新显示虚拟光标（如果它有焦点的话）
+            // 这部分逻辑可能需要更精细化处理，暂时保持简单
+          }}
           enterButton="发送"
           style={{ width: '100%' }}
         />
