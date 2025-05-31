@@ -41,6 +41,22 @@ import requests
 # 导入PTY管理器
 from pty_manager import pty_manager
 
+# 输出管理函数
+def add_server_output(game_id, message, max_lines=500):
+    """添加服务器输出并限制行数"""
+    if game_id not in running_servers:
+        return
+    
+    if 'output' not in running_servers[game_id]:
+        running_servers[game_id]['output'] = []
+    
+    running_servers[game_id]['output'].append(message)
+    
+    # 限制输出行数，最多保留指定行数
+    if len(running_servers[game_id]['output']) > max_lines:
+        # 移除最旧的输出，保持在指定行数以内
+        running_servers[game_id]['output'] = running_servers[game_id]['output'][-max_lines:]
+
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
@@ -338,9 +354,7 @@ def run_game_server(game_id, cmd, cwd):
                     # 先添加一些初始输出，确保有内容显示
                     server_output_queues[game_id].put(f"正在启动 {game_id} 服务器...")
                     
-                    if 'output' not in running_servers[game_id]:
-                        running_servers[game_id]['output'] = []
-                    running_servers[game_id]['output'].append(f"正在启动 {game_id} 服务器...")
+                    add_server_output(game_id, f"正在启动 {game_id} 服务器...")
                     
                     # 添加脚本路径信息
                     script_path = os.path.join(cwd, "start.sh")
@@ -349,7 +363,7 @@ def run_game_server(game_id, cmd, cwd):
                             with open(script_path, 'r') as f:
                                 script_content = f.read()
                                 server_output_queues[game_id].put(f"启动脚本内容: \n{script_content}")
-                                running_servers[game_id]['output'].append(f"启动脚本内容: \n{script_content}")
+                                add_server_output(game_id, f"启动脚本内容: \n{script_content}")
                         except Exception as e:
                             logger.error(f"读取启动脚本失败: {str(e)}")
                     
@@ -360,7 +374,7 @@ def run_game_server(game_id, cmd, cwd):
                     # 添加一个测试输出
                     test_message = "输出转发线程已启动，开始监听服务器输出..."
                     server_output_queues[game_id].put(test_message)
-                    running_servers[game_id]['output'].append(test_message)
+                    add_server_output(game_id, test_message)
                     
                     # 持续监听队列
                     while True:
@@ -383,7 +397,7 @@ def run_game_server(game_id, cmd, cwd):
                                         end_msg = f"游戏服务器 {game_id} 已正常退出: {message}"
                                         logger.info(end_msg)
                                         server_output_queues[game_id].put(end_msg)
-                                        running_servers[game_id]['output'].append(end_msg)
+                                        add_server_output(game_id, end_msg)
                                     
                                     # 进程出错
                                     elif status == 'error':
@@ -396,7 +410,7 @@ def run_game_server(game_id, cmd, cwd):
                                             
                                         logger.error(error_msg)
                                         server_output_queues[game_id].put(error_msg)
-                                        running_servers[game_id]['output'].append(error_msg)
+                                        add_server_output(game_id, error_msg)
                                         running_servers[game_id]['error'] = error_msg
                                     
                                     # 进程被终止
@@ -404,7 +418,7 @@ def run_game_server(game_id, cmd, cwd):
                                         stop_msg = f"游戏服务器 {game_id} 已被停止: {message}"
                                         logger.info(stop_msg)
                                         server_output_queues[game_id].put(stop_msg)
-                                        running_servers[game_id]['output'].append(stop_msg)
+                                        add_server_output(game_id, stop_msg)
                                     
                                     # 通知前端进程已结束
                                     complete_message = {
@@ -424,14 +438,14 @@ def run_game_server(game_id, cmd, cwd):
                                 elif isinstance(item, dict) and item.get('prompt'):
                                     # 这里处理Steam Guard等需要用户输入的情况
                                     server_output_queues[game_id].put(item)  # 直接转发，前端会处理
-                                    running_servers[game_id]['output'].append(f"请求输入: {item.get('prompt')}")
+                                    add_server_output(game_id, f"请求输入: {item.get('prompt')}")
                                     continue
                                     
                                 # 处理常规输出
                                 else:
                                     server_output_queues[game_id].put(item)
                                     if isinstance(item, str):
-                                        running_servers[game_id]['output'].append(item)
+                                        add_server_output(game_id, item)
                                         output_count += 1
                                         
                                         # 定期记录输出状态
@@ -467,7 +481,7 @@ def run_game_server(game_id, cmd, cwd):
                             logger.error(f"处理输出时出错: {str(e)}")
                             error_msg = f"处理输出时出错: {str(e)}"
                             server_output_queues[game_id].put(error_msg)
-                            running_servers[game_id]['output'].append(error_msg)
+                            add_server_output(game_id, error_msg)
                 
                 except Exception as e:
                     logger.error(f"输出转发线程异常: {str(e)}")
@@ -479,7 +493,7 @@ def run_game_server(game_id, cmd, cwd):
                 
                 # 如果游戏ID还在running_servers中，添加到输出历史
                 if game_id in running_servers:
-                    running_servers[game_id]['output'].append(end_msg)
+                    add_server_output(game_id, end_msg)
                     # 标记服务器已停止
                     running_servers[game_id]['running'] = False
                     
@@ -488,7 +502,7 @@ def run_game_server(game_id, cmd, cwd):
                         stop_msg = f"游戏服务器 {game_id} 已自动停止运行"
                         logger.info(stop_msg)
                         server_output_queues[game_id].put(stop_msg)
-                        running_servers[game_id]['output'].append(stop_msg)
+                        add_server_output(game_id, stop_msg)
                         
                         # 从运行中的服务器字典中移除该游戏服务器
                         logger.info(f"从运行中的服务器列表中移除游戏服务器: {game_id}")
@@ -634,8 +648,8 @@ def run_game_server(game_id, cmd, cwd):
                 
             # 确保保存到输出历史记录
             if game_id in running_servers and 'output' in running_servers[game_id]:
-                running_servers[game_id]['output'].append(error_msg)
-                running_servers[game_id]['output'].append("请检查启动脚本内容，确保配置文件完整，并验证执行权限")
+                add_server_output(game_id, error_msg)
+                add_server_output(game_id, "请检查启动脚本内容，确保配置文件完整，并验证执行权限")
 
 # 添加一个新函数来确保目录权限正确
 def ensure_steam_permissions(directory):
@@ -1572,10 +1586,10 @@ def start_game_server():
         if game_id in running_servers:
             if 'output' not in running_servers[game_id]:
                 running_servers[game_id]['output'] = []
-            running_servers[game_id]['output'].append("服务器启动中...")
-            running_servers[game_id]['output'].append(f"游戏目录: {game_dir}")
-            running_servers[game_id]['output'].append(f"启动脚本: {script_name_to_run}")
-            running_servers[game_id]['output'].append(f"启动命令: {cmd}")
+            add_server_output(game_id, "服务器启动中...")
+            add_server_output(game_id, f"游戏目录: {game_dir}")
+            add_server_output(game_id, f"启动脚本: {script_name_to_run}")
+            add_server_output(game_id, f"启动命令: {cmd}")
         else:
             logger.warning(f"游戏服务器 {game_id} 在尝试记录初始启动信息到running_servers时已不存在。可能已快速失败。")
         
@@ -2045,7 +2059,7 @@ def server_send_input():
                 if game_id in running_servers:
                     if 'output' not in running_servers[game_id]:
                         running_servers[game_id]['output'] = []
-                    running_servers[game_id]['output'].append(echo_message)
+                    add_server_output(game_id, echo_message)
                 
             return jsonify({'status': 'success', 'message': '输入已发送'})
         else:
@@ -4831,9 +4845,9 @@ def start_steamcmd():
         # 添加到输出历史
         if 'output' not in running_servers[game_id]:
             running_servers[game_id]['output'] = []
-        running_servers[game_id]['output'].append("SteamCMD启动中...")
-        running_servers[game_id]['output'].append(f"SteamCMD目录: {steamcmd_dir}")
-        running_servers[game_id]['output'].append(f"启动命令: {cmd}")
+        add_server_output(game_id, "SteamCMD启动中...")
+        add_server_output(game_id, f"SteamCMD目录: {steamcmd_dir}")
+        add_server_output(game_id, f"启动命令: {cmd}")
         
         return jsonify({
             'status': 'success', 

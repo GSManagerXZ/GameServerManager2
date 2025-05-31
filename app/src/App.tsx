@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Layout, Typography, Row, Col, Card, Button, Spin, message, Tooltip, Modal, Tabs, Form, Input, Menu, Tag, Dropdown, Radio, Drawer, Switch, List, Select } from 'antd';
-import { CloudServerOutlined, DashboardOutlined, AppstoreOutlined, PlayCircleOutlined, ReloadOutlined, DownOutlined, InfoCircleOutlined, FolderOutlined, UserOutlined, LogoutOutlined, LockOutlined, GlobalOutlined, MenuOutlined, SettingOutlined, ToolOutlined, BookOutlined, RocketOutlined } from '@ant-design/icons';
+import { CloudServerOutlined, DashboardOutlined, AppstoreOutlined, PlayCircleOutlined, ReloadOutlined, DownOutlined, InfoCircleOutlined, FolderOutlined, UserOutlined, LogoutOutlined, LockOutlined, GlobalOutlined, MenuOutlined, SettingOutlined, ToolOutlined, BookOutlined, RocketOutlined, HistoryOutlined } from '@ant-design/icons';
 import axios from 'axios';
 // 导入antd样式
 import 'antd/dist/antd.css';
@@ -152,15 +152,15 @@ const startServer = async (gameId: string, callback?: (line: any) => void, onCom
             callback(data.line);
           } else {
             callback(data.line);
+            
+            // 只有非历史输出才滚动到底部
+            setTimeout(() => {
+              const terminalEndRef = document.querySelector('.terminal-end-ref');
+              if (terminalEndRef && terminalEndRef.parentElement) {
+                terminalEndRef.parentElement.scrollTop = terminalEndRef.parentElement.scrollHeight;
+              }
+            }, 10);
           }
-          
-          // 确保滚动到底部
-          setTimeout(() => {
-            const terminalEndRef = document.querySelector('.terminal-end-ref');
-            if (terminalEndRef) {
-              terminalEndRef.scrollIntoView({ behavior: 'smooth' });
-            }
-          }, 10);
         }
       } catch (err) {
         console.error('解析服务器输出失败:', err, event.data);
@@ -447,12 +447,33 @@ const checkServerStatus = async (gameId: string) => {
   // 在适当位置添加 terminalEndRef
   const terminalEndRef = useRef<HTMLDivElement>(null);
 
-  // 输出更新后自动滚动到底部
+  // 输出更新后自动滚动到底部（仅在新输出时滚动，不在历史输出加载时滚动）
+  const lastOutputCountRef = useRef<number>(0);
   useEffect(() => {
-    if (terminalEndRef.current && serverModalVisible) {
-      terminalEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (terminalEndRef.current && serverModalVisible && selectedServerGame) {
+      const currentOutputCount = (serverOutputs[selectedServerGame.id] || []).length;
+      // 只有当输出数量增加时才滚动（新输出），而不是在Modal打开时滚动
+      if (currentOutputCount > lastOutputCountRef.current) {
+        const outputContainer = terminalEndRef.current.parentElement;
+        if (outputContainer) {
+          outputContainer.scrollTop = outputContainer.scrollHeight;
+        }
+      }
+      lastOutputCountRef.current = currentOutputCount;
     }
   }, [serverOutputs, selectedServerGame, serverModalVisible]);
+  
+  // Modal打开时确保显示底部（CSS已处理，无需滚动）
+  useEffect(() => {
+    if (serverModalVisible && terminalEndRef.current && selectedServerGame) {
+      // CSS flex布局已自动显示底部，无需额外滚动
+      // 只在有新内容时才需要确保可见性
+      const outputContainer = terminalEndRef.current.parentElement;
+      if (outputContainer) {
+        outputContainer.scrollTop = outputContainer.scrollHeight;
+      }
+    }
+  }, [serverModalVisible, selectedServerGame]);
 
   // 添加 handleSendServerInput 函数
   const handleSendServerInput = async (gameId: string, input: string) => {
@@ -938,8 +959,8 @@ const checkServerStatus = async (gameId: string) => {
                 // 确保滚动到底部
                 setTimeout(() => {
                   const terminalEndRef = document.querySelector('.terminal-end-ref');
-                  if (terminalEndRef) {
-                    terminalEndRef.scrollIntoView({ behavior: 'smooth' });
+                  if (terminalEndRef && terminalEndRef.parentElement) {
+                    terminalEndRef.parentElement.scrollTop = terminalEndRef.parentElement.scrollHeight;
                   }
                 }, 10);
               }
@@ -3429,40 +3450,102 @@ const checkServerStatus = async (gameId: string) => {
             </Button>
           </div>
         }
-        width={isMobile ? "95%" : 800}
+        width={isMobile ? "95%" : 1200}
       >
         <div className="server-console">
           <div className="terminal-container">
-            <div className="terminal-output">
-              {(serverOutputs[selectedServerGame?.id] || [])
-                .filter(line => !line.includes('等待服务器输出...'))
-                .map((line, index) => {
-                // 处理不同类型的输出行
-                let lineClass = "terminal-line";
-                let lineContent = line;
-                
-                // 检查是否为特殊类型的输出
-                if (typeof line === 'string') {
-                  if (line.includes('===')) {
-                    lineClass += " section-header";
-                  } else if (line.includes('[文件]') || line.includes('[文件输出]')) {
-                    lineClass += " file-output";
-                  } else if (line.includes('[心跳检查]')) {
-                    lineClass += " heartbeat-output";
-                  } else if (line.startsWith('>')) {
-                    lineClass += " command-input";
-                  }
-                }
-                
-                return (
-                  <div 
-                    key={index} 
-                    className={lineClass}
+            {/* 终端头部工具栏 */}
+            <div className="terminal-header">
+              <div className="terminal-info">
+                <span>输出日志: {(serverOutputs[selectedServerGame?.id] || []).filter(line => !line.includes('等待服务器输出...')).length} 行</span>
+                {(serverOutputs[selectedServerGame?.id] || []).filter(line => !line.includes('等待服务器输出...')).length > 20 && (
+                  <span className="terminal-status">（显示最新 20 行）</span>
+                )}
+              </div>
+              <div className="terminal-actions">
+                {(serverOutputs[selectedServerGame?.id] || []).filter(line => !line.includes('等待服务器输出...')).length > 20 && (
+                  <Button 
+                    type="link" 
+                    size="small" 
+                    icon={<HistoryOutlined />}
+                    onClick={() => {
+                      const allOutput = (serverOutputs[selectedServerGame?.id] || []).filter(line => !line.includes('等待服务器输出...'));
+                      Modal.info({
+                        title: `${selectedServerGame?.name || ''} 完整历史输出`,
+                        content: (
+                          <div className="terminal-history-modal">
+                            <div className="terminal-history-content">
+                              {allOutput.map((line, index) => {
+                                let lineClass = "terminal-history-line";
+                                let lineContent = line;
+                                
+                                // 检查是否为特殊类型的输出
+                                if (typeof line === 'string') {
+                                  if (line.includes('===')) {
+                                    lineClass += " section-header";
+                                  } else if (line.includes('[文件]') || line.includes('[文件输出]')) {
+                                    lineClass += " file-output";
+                                  } else if (line.includes('[心跳检查]')) {
+                                    lineClass += " heartbeat-output";
+                                  } else if (line.startsWith('>')) {
+                                    lineClass += " command-input";
+                                  }
+                                }
+                                
+                                return (
+                                  <div key={index} className={lineClass}>
+                                    <span className="line-number">{index + 1}</span>
+                                    <span className="line-content">{lineContent}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ),
+                        width: 800,
+                        okText: '关闭'
+                      });
+                    }}
                   >
-                    {lineContent}
-                  </div>
-                );
-              })}
+                    查看历史输出
+                  </Button>
+                )}
+              </div>
+            </div>
+            <div className="terminal-output">
+              {(() => {
+                const allOutput = (serverOutputs[selectedServerGame?.id] || [])
+                  .filter(line => !line.includes('等待服务器输出...'));
+                const displayOutput = allOutput.length > 20 ? allOutput.slice(-20) : allOutput;
+                
+                return displayOutput.map((line, index) => {
+                  // 处理不同类型的输出行
+                  let lineClass = "terminal-line";
+                  let lineContent = line;
+                  
+                  // 检查是否为特殊类型的输出
+                  if (typeof line === 'string') {
+                    if (line.includes('===')) {
+                      lineClass += " section-header";
+                    } else if (line.includes('[文件]') || line.includes('[文件输出]')) {
+                      lineClass += " file-output";
+                    } else if (line.includes('[心跳检查]')) {
+                      lineClass += " heartbeat-output";
+                    } else if (line.startsWith('>')) {
+                      lineClass += " command-input";
+                    }
+                  }
+                  
+                  return (
+                    <div 
+                      key={allOutput.length > 20 ? allOutput.length - 20 + index : index} 
+                      className={lineClass}
+                    >
+                      {lineContent}
+                    </div>
+                  );
+                });
+              })()}
               <div ref={terminalEndRef} className="terminal-end-ref" />
             </div>
           </div>
