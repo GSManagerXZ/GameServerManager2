@@ -2960,6 +2960,7 @@ def get_file_content():
     """获取文件内容"""
     try:
         path = request.args.get('path')
+        encoding = request.args.get('encoding', 'utf-8')  # 默认使用UTF-8编码
         
         # 安全检查
         if not path or '..' in path or not path.startswith('/'):
@@ -2976,11 +2977,27 @@ def get_file_content():
         if os.path.getsize(path) > 10 * 1024 * 1024:  # 10MB限制
             return jsonify({'status': 'error', 'message': '文件过大，无法读取'})
             
-        # 读取文件内容
-        with open(path, 'r', encoding='utf-8', errors='replace') as f:
-            content = f.read()
+        # 验证编码格式
+        supported_encodings = ['utf-8', 'gbk', 'gb2312', 'big5', 'ascii', 'latin1', 'utf-16', 'utf-32']
+        if encoding not in supported_encodings:
+            encoding = 'utf-8'  # 如果编码不支持，回退到UTF-8
             
-        return jsonify({'status': 'success', 'content': content})
+        # 读取文件内容
+        try:
+            with open(path, 'r', encoding=encoding, errors='replace') as f:
+                content = f.read()
+        except UnicodeDecodeError:
+            # 如果指定编码失败，尝试使用UTF-8
+            logger.warning(f"使用编码 {encoding} 读取文件失败，尝试使用 UTF-8")
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+            encoding = 'utf-8'  # 更新实际使用的编码
+            
+        return jsonify({
+            'status': 'success', 
+            'content': content,
+            'encoding': encoding  # 返回实际使用的编码
+        })
         
     except Exception as e:
         logger.error(f"读取文件内容时出错: {str(e)}")
@@ -2993,10 +3010,16 @@ def save_file_content():
         data = request.json
         path = data.get('path')
         content = data.get('content', '')
+        encoding = data.get('encoding', 'utf-8')  # 默认使用UTF-8编码
         
         # 安全检查
         if not path or '..' in path or not path.startswith('/'):
             return jsonify({'status': 'error', 'message': '无效的文件路径'})
+            
+        # 验证编码格式
+        supported_encodings = ['utf-8', 'gbk', 'gb2312', 'big5', 'ascii', 'latin1', 'utf-16', 'utf-32']
+        if encoding not in supported_encodings:
+            encoding = 'utf-8'  # 如果编码不支持，回退到UTF-8
             
         # 确保目录存在
         dir_path = os.path.dirname(path)
@@ -3004,10 +3027,20 @@ def save_file_content():
             os.makedirs(dir_path)
             
         # 写入文件
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(content)
+        try:
+            with open(path, 'w', encoding=encoding) as f:
+                f.write(content)
+        except UnicodeEncodeError:
+            # 如果指定编码失败，尝试使用UTF-8
+            logger.warning(f"使用编码 {encoding} 保存文件失败，尝试使用 UTF-8")
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            encoding = 'utf-8'  # 更新实际使用的编码
             
-        return jsonify({'status': 'success'})
+        return jsonify({
+            'status': 'success',
+            'encoding': encoding  # 返回实际使用的编码
+        })
         
     except Exception as e:
         logger.error(f"保存文件内容时出错: {str(e)}")
