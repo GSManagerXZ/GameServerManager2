@@ -7,5 +7,5 @@
 [介绍](README.md)
 [部署指南](/docs/部署指南.md) \
 [Github](https://github.com/yxsj245/GameServerManager) 
-[Gitee](https://gitee.com/xiao-zhu245/gameserver_container) \
+[Gitee](https://github.com/yxsj245/GameServerManager) \
 [查看发行版信息](https://github.com/yxsj245/GameServerManager/releases)

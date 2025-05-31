@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Layout, Typography, Row, Col, Card, Button, Spin, message, Tooltip, Modal, Tabs, Form, Input, Menu, Tag, Dropdown, Radio, Drawer, Switch, List, Select } from 'antd';
-import { CloudServerOutlined, DashboardOutlined, AppstoreOutlined, PlayCircleOutlined, ReloadOutlined, DownOutlined, InfoCircleOutlined, FolderOutlined, UserOutlined, LogoutOutlined, LockOutlined, GlobalOutlined, MenuOutlined, SettingOutlined, ToolOutlined, BookOutlined } from '@ant-design/icons';
+import { CloudServerOutlined, DashboardOutlined, AppstoreOutlined, PlayCircleOutlined, ReloadOutlined, DownOutlined, InfoCircleOutlined, FolderOutlined, UserOutlined, LogoutOutlined, LockOutlined, GlobalOutlined, MenuOutlined, SettingOutlined, ToolOutlined, BookOutlined, RocketOutlined } from '@ant-design/icons';
 import axios from 'axios';
 // 导入antd样式
 import 'antd/dist/antd.css';
@@ -2362,8 +2362,8 @@ const checkServerStatus = async (gameId: string) => {
                 },
                 {
                   key: 'games',
-                  icon: <AppstoreOutlined />,
-                  label: '游戏管理'
+                  icon: <RocketOutlined />,
+                  label: '游戏部署'
                 },
                 {
                   key: 'environment',
@@ -2437,8 +2437,8 @@ const checkServerStatus = async (gameId: string) => {
             },
             {
               key: 'games',
-              icon: <AppstoreOutlined />,
-              label: '游戏管理'
+              icon: <RocketOutlined />,
+              label: '游戏部署'
             },
             {
               key: 'environment',
@@ -3297,7 +3297,7 @@ const checkServerStatus = async (gameId: string) => {
             </div>
           )}
         </Content>
-        <Footer style={{ textAlign: 'center' }}>GameServerManager ©2025 又菜又爱玩的小朱 最后更新日期5.30</Footer>
+        <Footer style={{ textAlign: 'center' }}>GameServerManager ©2025 又菜又爱玩的小朱 最后更新日期5.31</Footer>
       </Layout>
 
       {/* 安装终端Modal */}
