@@ -2687,6 +2687,28 @@ const checkServerStatus = async (gameId: string) => {
                     </Card>
                   </div>
                 </TabPane>
+                <TabPane tab="Minecraft部署" key="minecraft-deploy">
+                  <div style={{ maxWidth: 800, margin: '0 auto', padding: '20px 0' }}>
+                    <Card title="Minecraft服务器部署">
+                      <div style={{ textAlign: 'center', padding: '40px 0' }}>
+                        <Title level={3}>Minecraft部署功能</Title>
+                        <Paragraph>
+                          此功能正在开发中，敬请期待...
+                        </Paragraph>
+                        <Paragraph type="secondary">
+                          未来将支持：
+                        </Paragraph>
+                        <ul style={{ textAlign: 'left', display: 'inline-block' }}>
+                          <li>原版Minecraft服务器部署</li>
+                          <li>Forge模组服务器部署</li>
+                          <li>Fabric模组服务器部署</li>
+                          <li>Paper/Spigot插件服务器部署</li>
+                          <li>自定义配置和插件管理</li>
+                        </ul>
+                      </div>
+                    </Card>
+                  </div>
+                </TabPane>
               </Tabs>
             </div>
           )}
