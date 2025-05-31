@@ -736,15 +736,14 @@ def get_games():
         logger.debug("获取游戏列表")
         
         # 检查赞助者身份
-        config = load_config()
-        sponsor_key = config.get('sponsor_key')
+        validator = get_sponsor_validator()
         cloud_error = None
         
         # 如果有赞助者密钥，尝试从云端获取游戏列表
-        if sponsor_key:
+        if validator.has_sponsor_key():
             try:
                 # 设置5秒超时
-                cloud_games = fetch_cloud_games(sponsor_key)
+                cloud_games = validator.fetch_cloud_games()
                 if cloud_games:
                     logger.debug(f"从云端获取到 {len(cloud_games)} 个游戏")
                     return jsonify({'status': 'success', 'games': cloud_games, 'source': 'cloud'})
@@ -785,45 +784,16 @@ def get_games():
         logger.error(f"获取游戏列表失败: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+# 导入赞助者验证模块
+from sponsor_validator import get_sponsor_validator
+
 def fetch_cloud_games(sponsor_key):
     """从云端获取游戏列表"""
     try:
-        logger.debug("正在从云端获取游戏列表...")
-        
-        # 创建一个带有超时的会话
-        session = requests.Session()
-        response = session.get('http://82.156.35.55:5001/games', 
-                              headers={'key': sponsor_key}, 
-                              timeout=5)
-        
-        if response.status_code == 200:
-            cloud_data = response.json()
-            game_list = []
-            
-            # 处理返回的云端游戏数据
-            for game_id, game_info in cloud_data.items():
-                game_list.append({
-                    'id': game_id,
-                    'name': game_info.get('game_nameCN', game_id),
-                    'appid': game_info.get('appid'),
-                    'anonymous': game_info.get('anonymous', True),
-                    'has_script': game_info.get('script', False),
-                    'tip': game_info.get('tip', ''),
-                    'image': game_info.get('image', ''),
-                    'url': game_info.get('url', ''),
-                    'script_name': game_info.get('script_name', '')  # 保存脚本内容
-                })
-            
-            return game_list
-        elif response.status_code == 403:
-            # 403错误意味着凭证验证不通过
-            logger.error("赞助者凭证验证不通过，状态码403")
-            raise Exception("403：赞助者凭证验证不通过")
-        else:
-            logger.error(f"云端服务器返回错误: {response.status_code}")
-            return None
-    except requests.exceptions.RequestException as e:
-        logger.error(f"请求云端服务器失败: {str(e)}")
+        validator = get_sponsor_validator()
+        return validator.fetch_cloud_games(sponsor_key)
+    except Exception as e:
+        logger.error(f"获取云端游戏列表失败: {str(e)}")
         raise
 
 @app.route('/api/install', methods=['POST'])
@@ -840,15 +810,14 @@ def install_game():
         logger.info(f"请求安装游戏: {game_id}")
         
         # 获取游戏信息 - 首先尝试从云端获取
-        config = load_config()
-        sponsor_key = config.get('sponsor_key')
+        validator = get_sponsor_validator()
         game_info = None
         script_name = None
         
         # 如果有赞助者凭证，尝试从云端获取游戏信息
-        if sponsor_key:
+        if validator.has_sponsor_key():
             try:
-                cloud_games = fetch_cloud_games(sponsor_key)
+                cloud_games = validator.fetch_cloud_games()
                 if cloud_games:
                     # 查找指定游戏
                     for game in cloud_games:
@@ -4987,29 +4956,12 @@ def save_sponsor_key():
         if not sponsor_key:
             return jsonify({'status': 'error', 'message': '赞助者凭证不能为空'}), 400
             
-        # 加载现有配置
-        config_path = "/home/steam/games/config.json"
-        existing_config = {}
-        
-        if os.path.exists(config_path):
-            try:
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    existing_config = json.load(f)
-            except Exception as e:
-                logger.error(f"读取配置文件失败: {str(e)}")
-                
-        # 确保目录存在
-        os.makedirs(os.path.dirname(config_path), exist_ok=True)
-        
-        # 添加或更新赞助者凭证
-        existing_config['sponsor_key'] = sponsor_key
-        
-        # 保存配置
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump(existing_config, f, indent=4)
-            
-        logger.info("赞助者凭证已保存")
-        return jsonify({'status': 'success', 'message': '赞助者凭证已保存'})
+        # 使用赞助者验证模块保存密钥
+        validator = get_sponsor_validator()
+        if validator.save_sponsor_key(sponsor_key):
+            return jsonify({'status': 'success', 'message': '赞助者凭证已保存'})
+        else:
+            return jsonify({'status': 'error', 'message': '保存赞助者凭证失败'}), 500
         
     except Exception as e:
         logger.error(f"保存赞助者凭证时出错: {str(e)}")
@@ -5019,32 +4971,18 @@ def save_sponsor_key():
 def get_sponsor_key():
     """获取当前赞助者凭证"""
     try:
-        # 加载配置文件
-        config_path = "/home/steam/games/config.json"
+        # 使用赞助者验证模块获取密钥信息
+        validator = get_sponsor_validator()
         
-        if not os.path.exists(config_path):
-            return jsonify({'status': 'success', 'sponsor_key': None})
-            
-        try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                sponsor_key = config.get('sponsor_key')
-                
-                # 为了安全起见，只返回是否存在凭证，不返回完整凭证
-                if sponsor_key:
-                    # 只返回前四个字符和最后四个字符，中间用星号代替
-                    masked_key = sponsor_key[:4] + '*' * (len(sponsor_key) - 8) + sponsor_key[-4:] if len(sponsor_key) > 8 else sponsor_key
-                    return jsonify({
-                        'status': 'success', 
-                        'has_sponsor_key': True,
-                        'masked_sponsor_key': masked_key
-                    })
-                else:
-                    return jsonify({'status': 'success', 'has_sponsor_key': False})
-                    
-        except Exception as e:
-            logger.error(f"读取配置文件失败: {str(e)}")
-            return jsonify({'status': 'error', 'message': f'读取配置文件失败: {str(e)}'}), 500
+        if validator.has_sponsor_key():
+            masked_key = validator.get_masked_sponsor_key()
+            return jsonify({
+                'status': 'success', 
+                'has_sponsor_key': True,
+                'masked_sponsor_key': masked_key
+            })
+        else:
+            return jsonify({'status': 'success', 'has_sponsor_key': False})
             
     except Exception as e:
         logger.error(f"获取赞助者凭证时出错: {str(e)}")
