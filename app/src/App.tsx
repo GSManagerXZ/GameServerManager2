@@ -3720,6 +3720,7 @@ const checkServerStatus = async (gameId: string) => {
         <div style={{ marginTop: 20, padding: 16, backgroundColor: '#f6f8fa', borderRadius: 6 }}>
           <p style={{ margin: 0, fontSize: 12, color: '#666' }}>
             <strong>说明：</strong><br/>
+            • 路径全部为容器路径，也就是文件管理中的路径<br/>
             • 备份文件将保存到 /home/steam/backup/任务名称/ 目录<br/>
             • 使用tar格式进行归档压缩<br/>
             • 自动删除超出保留份数的旧备份文件
