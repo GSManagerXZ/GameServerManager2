@@ -5114,7 +5114,6 @@ def auto_start_servers():
     global _auto_start_initialized
     
     if _auto_start_initialized:
-        logger.info("自启动功能已经初始化过，跳过")
         return
         
     _auto_start_initialized = True
@@ -6722,5 +6721,7 @@ if __name__ == '__main__':
     auto_start_servers()
     
     # 直接运行时使用Flask内置服务器，而不是通过Gunicorn导入时
-    logger.warning("使用Flask开发服务器启动 - 不推荐用于生产环境")
-    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+    # 从环境变量读取端口配置，默认为5000
+    port = int(os.environ.get('GUNICORN_PORT', 5000))
+    logger.warning(f"使用Flask开发服务器启动 - 不推荐用于生产环境，监听端口: {port}")
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
