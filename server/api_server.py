@@ -120,6 +120,13 @@ def ensure_backup_config_loaded():
         start_backup_scheduler()
         _backup_config_loaded = True
 
+def ensure_auto_start_initialized():
+    """确保自启动功能已初始化（用于Gunicorn启动）"""
+    try:
+        auto_start_servers()
+    except Exception as e:
+        logger.error(f"初始化自启动功能时出错: {str(e)}")
+
 # 导入JWT配置
 from config import JWT_SECRET, JWT_EXPIRATION
 
@@ -171,6 +178,9 @@ def is_public_route(path):
 # 在每个请求前检查认证
 @app.before_request
 def check_auth():
+    # 确保自启动功能已初始化（用于Gunicorn启动）
+    ensure_auto_start_initialized()
+    
     # 记录请求路径，帮助调试
     logger.debug(f"收到请求: {request.method} {request.path}, 参数: {request.args}, 头部: {request.headers}")
     
@@ -5096,6 +5106,217 @@ logger.info("临时错误信息清理线程已启动")
 # 添加自启动相关的常量和函数
 CONFIG_FILE = "/home/steam/games/config.json"
 
+# 自启动功能初始化标志
+_auto_start_initialized = False
+
+def auto_start_servers():
+    """在应用启动时自动启动配置的服务器"""
+    global _auto_start_initialized
+    
+    if _auto_start_initialized:
+        logger.info("自启动功能已经初始化过，跳过")
+        return
+        
+    _auto_start_initialized = True
+    
+    try:
+        logger.info("开始检查自启动服务器配置...")
+        
+        # 加载配置
+        config = load_config()
+        auto_restart_servers = config.get('auto_restart_servers', [])
+        auto_restart_frps = config.get('auto_restart_frps', [])
+        
+        if not auto_restart_servers and not auto_restart_frps:
+            logger.info("没有配置自启动的服务器或内网穿透")
+            return
+            
+        # 延迟启动，确保应用完全初始化
+        def delayed_auto_start():
+            time.sleep(5)  # 等待5秒确保应用完全启动
+            
+            # 自动启动服务器
+            if auto_restart_servers:
+                logger.info(f"发现 {len(auto_restart_servers)} 个自启动服务器: {auto_restart_servers}")
+                
+                for game_id in auto_restart_servers:
+                    try:
+                        # 检查游戏目录是否存在
+                        game_dir = os.path.join(GAMES_DIR, game_id)
+                        if not os.path.exists(game_dir):
+                            logger.warning(f"游戏目录不存在，跳过自启动: {game_dir}")
+                            continue
+                            
+                        # 检查是否已经在运行
+                        if game_id in running_servers and running_servers[game_id].get('running', False):
+                            logger.info(f"游戏服务器 {game_id} 已在运行，跳过自启动")
+                            continue
+                            
+                        logger.info(f"自动启动游戏服务器: {game_id}")
+                        
+                        # 查找启动脚本
+                        script_name = "start.sh"
+                        script_path = os.path.join(game_dir, script_name)
+                        
+                        # 尝试从.last_script文件读取上次使用的脚本
+                        last_script_path = os.path.join(game_dir, '.last_script')
+                        if os.path.exists(last_script_path):
+                            try:
+                                with open(last_script_path, 'r') as f:
+                                    saved_script = f.read().strip()
+                                    if saved_script and os.path.exists(os.path.join(game_dir, saved_script)):
+                                        script_name = saved_script
+                                        script_path = os.path.join(game_dir, script_name)
+                                        logger.info(f"使用上次保存的启动脚本: {script_name}")
+                            except Exception as e:
+                                logger.warning(f"读取.last_script文件失败: {str(e)}")
+                        
+                        if not os.path.exists(script_path):
+                            logger.warning(f"启动脚本不存在，跳过自启动: {script_path}")
+                            continue
+                            
+                        # 确保脚本有执行权限
+                        if not os.access(script_path, os.X_OK):
+                            logger.info(f"添加脚本执行权限: {script_path}")
+                            os.chmod(script_path, 0o755)
+                        
+                        # 构建启动命令
+                        cmd = f"su - steam -c 'cd {game_dir} && ./{script_name}'"
+                        
+                        # 初始化服务器状态跟踪
+                        running_servers[game_id] = {
+                            'process': None,
+                            'output': [],
+                            'started_at': time.time(),
+                            'running': True,
+                            'return_code': None,
+                            'cmd': cmd,
+                            'master_fd': None,
+                            'game_dir': game_dir,
+                            'external': False,
+                            'script_name': script_name,
+                            'auto_started': True  # 标记为自动启动
+                        }
+                        
+                        # 创建输出队列
+                        if game_id not in server_output_queues:
+                            server_output_queues[game_id] = queue.Queue()
+                        
+                        # 在单独的线程中启动服务器
+                        server_thread = threading.Thread(
+                            target=run_game_server,
+                            args=(game_id, cmd, game_dir),
+                            daemon=True
+                        )
+                        server_thread.start()
+                        
+                        logger.info(f"游戏服务器 {game_id} 自启动线程已启动")
+                        
+                        # 间隔启动，避免同时启动太多服务器
+                        time.sleep(2)
+                        
+                    except Exception as e:
+                        logger.error(f"自动启动游戏服务器 {game_id} 失败: {str(e)}")
+            
+            # 自动启动内网穿透
+            if auto_restart_frps:
+                logger.info(f"发现 {len(auto_restart_frps)} 个自启动内网穿透: {auto_restart_frps}")
+                
+                for frp_id in auto_restart_frps:
+                    try:
+                        # 检查是否已经在运行
+                        if frp_id in running_frp_processes:
+                            logger.info(f"内网穿透 {frp_id} 已在运行，跳过自启动")
+                            continue
+                            
+                        logger.info(f"自动启动内网穿透: {frp_id}")
+                        
+                        # 加载FRP配置
+                        configs = load_frp_configs()
+                        target_config = None
+                        
+                        for config in configs:
+                            if config['id'] == frp_id:
+                                target_config = config
+                                break
+                        
+                        if not target_config:
+                            logger.warning(f"未找到内网穿透 {frp_id} 的配置，跳过自启动")
+                            continue
+                        
+                        # 启动内网穿透
+                        # 根据FRP类型选择不同的二进制文件和目录
+                        frp_binary = FRP_BINARY
+                        frp_dir = os.path.join(FRP_DIR, "LoCyanFrp")
+                        
+                        if target_config['type'] == 'custom':
+                            frp_binary = CUSTOM_FRP_BINARY
+                            frp_dir = CUSTOM_FRP_DIR
+                        elif target_config['type'] == 'mefrp':
+                            frp_binary = MEFRP_BINARY
+                            frp_dir = MEFRP_DIR
+                        elif target_config['type'] == 'sakura':
+                            frp_binary = SAKURA_BINARY
+                            frp_dir = SAKURA_DIR
+                        
+                        # 确保FRP可执行
+                        if not os.path.exists(frp_binary):
+                            logger.warning(f"{target_config['type']}客户端程序不存在，跳过自启动: {frp_binary}")
+                            continue
+                        
+                        # 设置可执行权限
+                        os.chmod(frp_binary, 0o755)
+                        
+                        # 创建日志文件
+                        log_file_path = os.path.join(FRP_LOGS_DIR, f"{frp_id}.log")
+                        log_file = open(log_file_path, 'w')
+                        
+                        # 构建命令
+                        command = f"{frp_binary} {target_config['command']}"
+                        
+                        # 启动FRP进程
+                        process = subprocess.Popen(
+                            shlex.split(command),
+                            stdout=log_file,
+                            stderr=log_file,
+                            cwd=frp_dir
+                        )
+                        
+                        # 保存进程信息
+                        running_frp_processes[frp_id] = {
+                            'process': process,
+                            'log_file': log_file_path,
+                            'started_at': time.time(),
+                            'auto_started': True  # 标记为自动启动
+                        }
+                        
+                        # 更新配置状态
+                        configs = load_frp_configs()
+                        for config in configs:
+                            if config['id'] == frp_id:
+                                config['status'] = 'running'
+                                break
+                        save_frp_configs(configs)
+                        
+                        logger.info(f"内网穿透 {frp_id} 自启动成功")
+                        
+                        # 间隔启动
+                        time.sleep(1)
+                        
+                    except Exception as e:
+                        logger.error(f"自动启动内网穿透 {frp_id} 失败: {str(e)}")
+                        
+            logger.info("自启动功能执行完成")
+        
+        # 在后台线程中执行延迟启动
+        auto_start_thread = threading.Thread(target=delayed_auto_start, daemon=True)
+        auto_start_thread.start()
+        
+        logger.info("自启动功能已初始化，将在5秒后开始执行")
+        
+    except Exception as e:
+        logger.error(f"初始化自启动功能失败: {str(e)}")
+
 def load_config():
     """加载配置文件"""
     try:
@@ -6496,6 +6717,9 @@ if __name__ == '__main__':
     # 加载备份配置
     load_backup_config()
     start_backup_scheduler()
+    
+    # 启动自启动功能
+    auto_start_servers()
     
     # 直接运行时使用Flask内置服务器，而不是通过Gunicorn导入时
     logger.warning("使用Flask开发服务器启动 - 不推荐用于生产环境")
