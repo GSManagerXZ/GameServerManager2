@@ -26,6 +26,7 @@ class SponsorValidator:
         """
         self.config_path = config_path
         self.cloud_api_url = "http://82.156.35.55:5001/games"
+        self.version_api_url = "http://82.156.35.55:5001/version"
         self.request_timeout = 5
     
     def load_config(self) -> Dict[str, Any]:
@@ -251,6 +252,50 @@ class SponsorValidator:
         else:
             logger.info("没有找到赞助者密钥，无需移除")
             return True
+    
+    def check_version_update(self, sponsor_key: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        检查版本更新
+        
+        Args:
+            sponsor_key: 赞助者密钥，如果为None则使用配置文件中的密钥
+            
+        Returns:
+            版本信息字典，包含version和description字段，如果获取失败则返回None
+        """
+        if sponsor_key is None:
+            sponsor_key = self.get_sponsor_key()
+            
+        if not sponsor_key:
+            logger.warning("没有找到赞助者密钥，无法检查版本更新")
+            return None
+            
+        try:
+            logger.debug("正在检查版本更新...")
+            
+            session = requests.Session()
+            response = session.get(
+                self.version_api_url,
+                headers={'key': sponsor_key},
+                timeout=self.request_timeout
+            )
+            
+            if response.status_code == 200:
+                version_data = response.json()
+                logger.info(f"成功获取版本信息: {version_data.get('version', 'unknown')}")
+                return version_data
+                
+            elif response.status_code == 403:
+                logger.error("赞助者凭证验证不通过，状态码403")
+                return None
+                
+            else:
+                logger.error(f"检查版本更新失败：服务器返回状态码 {response.status_code}")
+                return None
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"检查版本更新时网络请求失败: {str(e)}")
+            return None
 
 
 # 便捷函数，提供简单的调用接口

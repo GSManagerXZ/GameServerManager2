@@ -16,7 +16,7 @@ import About from './pages/About'; // 导入关于项目页面
 import Settings from './pages/Settings'; // 导入设置页面
 import Environment from './pages/Environment'; // 导入环境安装页面
 import ServerGuide from './pages/ServerGuide'; // 导入开服指南页面
-import { fetchGames, installGame, terminateInstall, installByAppId, openGameFolder } from './api';
+import { fetchGames, installGame, terminateInstall, installByAppId, openGameFolder, checkVersionUpdate } from './api';
 import { GameInfo } from './types';
 import { useAuth } from './context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -2507,6 +2507,45 @@ const App: React.FC = () => {
 
   const [frpDocModalVisible, setFrpDocModalVisible] = useState<boolean>(false);
   
+  // 版本检查相关状态
+  const [versionUpdateModalVisible, setVersionUpdateModalVisible] = useState<boolean>(false);
+  const [latestVersionInfo, setLatestVersionInfo] = useState<{version: string, description: any} | null>(null);
+  const currentVersion = '2.0.2'; // 当前版本号
+  
+  // 版本检查功能
+  const checkForUpdates = async () => {
+    try {
+      const response = await checkVersionUpdate();
+      
+      // 如果返回skip状态，说明没有赞助者密钥，静默跳过
+      if (response && response.status === 'skip') {
+        console.log('跳过版本检查:', response.message);
+        return;
+      }
+      
+      // 如果有版本信息且版本不同，显示更新弹窗
+      if (response && response.version && response.version !== currentVersion) {
+        setLatestVersionInfo(response);
+        setVersionUpdateModalVisible(true);
+      }
+    } catch (error) {
+      // 静默处理版本检查错误，不影响用户体验
+      console.warn('版本检查失败:', error);
+    }
+  };
+  
+  // 在用户登录后检查版本更新
+  useEffect(() => {
+    if (isAuthenticated) {
+      // 延迟3秒后检查版本，避免影响应用启动速度
+      const timer = setTimeout(() => {
+        checkForUpdates();
+      }, 3000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isAuthenticated]);
+  
   // 检查是否需要显示内网穿透文档弹窗（仅在首次访问时）
   useEffect(() => {
     const frpDocViewed = Cookies.get('frp_doc_viewed');
@@ -4056,6 +4095,91 @@ const App: React.FC = () => {
       
       {/* 添加内网穿透文档弹窗 */}
       <FrpDocModal visible={frpDocModalVisible} onClose={handleCloseFrpDocModal} />
+      
+      {/* 版本更新提示弹窗 */}
+      <Modal
+        title="🎉 发现新版本"
+        open={versionUpdateModalVisible}
+        onCancel={() => setVersionUpdateModalVisible(false)}
+        footer={[
+          <Button key="later" onClick={() => setVersionUpdateModalVisible(false)}>
+            稍后提醒
+          </Button>,
+          <Button key="copy" onClick={() => {
+            const dockerCommand = `docker pull xiaozhu674/gameservermanager:${latestVersionInfo?.version || 'latest'}`;
+            
+            // 检查是否支持现代剪贴板API
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(dockerCommand).then(() => {
+                message.success('Docker镜像地址已复制到剪贴板');
+              }).catch(() => {
+                message.error('复制失败，请手动复制');
+              });
+            } else {
+              // 降级方案：使用传统的document.execCommand
+              try {
+                const textArea = document.createElement('textarea');
+                textArea.value = dockerCommand;
+                textArea.style.position = 'fixed';
+                textArea.style.opacity = '0';
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                const successful = document.execCommand('copy');
+                document.body.removeChild(textArea);
+                
+                if (successful) {
+                  message.success('Docker镜像地址已复制到剪贴板');
+                } else {
+                  message.error('复制失败，请手动复制：' + dockerCommand);
+                }
+              } catch (err) {
+                message.error('复制失败，请手动复制：' + dockerCommand);
+              }
+            }
+          }}>
+            复制镜像地址
+          </Button>,
+          <Button key="download" type="primary" onClick={() => {
+            window.open('https://pan.baidu.com/s/1NyinYIwX1xeL4jWafIuOgw?pwd=v75z', '_blank');
+          }}>
+            前往下载离线镜像
+          </Button>
+        ]}
+        width={500}
+      >
+        <div style={{ padding: '16px 0' }}>
+          <p style={{ fontSize: '16px', marginBottom: '16px' }}>
+            <strong>当前版本：</strong>{currentVersion}
+          </p>
+          <p style={{ fontSize: '16px', marginBottom: '16px' }}>
+            <strong>最新版本：</strong>{latestVersionInfo?.version}
+          </p>
+          {latestVersionInfo?.description && (
+            <div>
+              <p style={{ fontSize: '16px', marginBottom: '8px' }}>
+                <strong>更新内容：</strong>
+              </p>
+              <div style={{ 
+                background: '#f5f5f5', 
+                padding: '12px', 
+                borderRadius: '6px',
+                fontSize: '14px',
+                lineHeight: '1.6'
+              }}>
+                {typeof latestVersionInfo.description === 'object' ? 
+                  Object.entries(latestVersionInfo.description).map(([type, content], index) => (
+                    <div key={index} style={{ marginBottom: index < Object.entries(latestVersionInfo.description).length - 1 ? '8px' : '0' }}>
+                      <strong style={{ color: '#1890ff' }}>{type}：</strong>{content}
+                    </div>
+                  )) :
+                  latestVersionInfo.description
+                }
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
     </Layout>
   );
 };

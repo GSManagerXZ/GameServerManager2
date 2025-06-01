@@ -4988,6 +4988,43 @@ def get_sponsor_key():
         logger.error(f"获取赞助者凭证时出错: {str(e)}")
         return jsonify({'status': 'error', 'message': f'获取赞助者凭证失败: {str(e)}'}), 500
 
+@app.route('/api/version/check', methods=['GET'])
+@auth_required
+def check_version_update():
+    """检查版本更新"""
+    try:
+        # 使用赞助者验证模块检查版本更新
+        validator = get_sponsor_validator()
+        
+        # 检查是否有赞助者密钥
+        if not validator.has_sponsor_key():
+            return jsonify({
+                'status': 'skip', 
+                'message': '未配置赞助者密钥，跳过版本检查'
+            }), 200
+        
+        # 获取版本信息
+        version_info = validator.check_version_update()
+        
+        if version_info:
+            return jsonify({
+                'status': 'success',
+                'version': version_info.get('version'),
+                'description': version_info.get('description', {})
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': '获取版本信息失败，请检查网络连接或赞助者凭证'
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"检查版本更新时出错: {str(e)}")
+        return jsonify({
+            'status': 'error', 
+            'message': f'检查版本更新失败: {str(e)}'
+        }), 500
+
 @app.route('/api/server/list_scripts', methods=['GET'])
 def list_server_scripts():
     """获取服务器目录下所有可执行的sh脚本"""

@@ -293,4 +293,24 @@ export const openGameFolder = async (gameId: string): Promise<boolean> => {
   } catch (error) {
     return false;
   }
-}; 
+};
+
+// 检查版本更新
+export const checkVersionUpdate = async (): Promise<{version: string, description: any} | null> => {
+  try {
+    const response = await api.get('/version/check');
+    
+    if (response.data.status === 'success') {
+      return {
+        version: response.data.version,
+        description: response.data.description
+      };
+    } else {
+      console.warn('版本检查失败:', response.data.message);
+      return null;
+    }
+  } catch (error: any) {
+    console.warn('版本检查请求失败:', error?.message || error);
+    return null;
+  }
+};
