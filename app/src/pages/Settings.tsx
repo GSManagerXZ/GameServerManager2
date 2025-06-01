@@ -82,9 +82,8 @@ const Settings: React.FC = () => {
       <Paragraph type="secondary">
         <InfoCircleOutlined /> 赞助者权益:
         <ul>
-          <li>从云端获取更多可部署的游戏列表</li>
-          <li>获取专属的游戏服务器部署脚本</li>
-          <li>后续更多特权功能将陆续推出</li>
+          <li>从云端获取更多可部署的游戏列表及最新的游戏启动脚本</li>
+          <li>版本更新提示功能</li>
         </ul>
       </Paragraph>
       
