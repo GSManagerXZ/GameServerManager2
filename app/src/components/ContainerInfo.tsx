@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Progress, Statistic, Table, Typography, Button, Space, Row, Col, Divider, Tag, Dropdown, Menu, Alert, Modal, message } from 'antd';
-import { ReloadOutlined, HddOutlined, RocketOutlined, AppstoreOutlined, DownOutlined, GlobalOutlined, WarningOutlined, DesktopOutlined, ApiOutlined, ExclamationCircleOutlined, StopOutlined } from '@ant-design/icons';
+import { Card, Progress, Statistic, Table, Typography, Button, Space, Row, Col, Divider, Tag, Dropdown, Menu, Alert, Modal, message, Slider } from 'antd';
+import { ReloadOutlined, HddOutlined, RocketOutlined, AppstoreOutlined, DownOutlined, GlobalOutlined, WarningOutlined, DesktopOutlined, ApiOutlined, ExclamationCircleOutlined, StopOutlined, DragOutlined, SettingOutlined } from '@ant-design/icons';
+import { DragDropContext, Droppable, Draggable, DropResult } from 'react-beautiful-dnd';
 import axios from 'axios';
 import { useIsMobile } from '../hooks/useIsMobile'; // 导入移动端检测钩子
 
@@ -8,14 +9,10 @@ const { Title, Paragraph } = Typography;
 
 interface SystemInfo {
   cpu_usage: number;
-  cpu_model?: string;
-  cpu_cores?: number;
-  cpu_logical_cores?: number;
   memory: {
     total: number;
     used: number;
     percent: number;
-    frequency?: string;
   };
   disk: {
     total: number;
@@ -89,6 +86,27 @@ interface ContainerInfoProps {
   onUninstallGame?: (gameId: string) => void;
 }
 
+// 卡片配置接口
+interface CardConfig {
+  id: string;
+  title: string;
+  type: 'cpu' | 'memory' | 'disk' | 'network' | 'installedGames' | 'runningGames' | 'processes' | 'ports';
+  visible: boolean;
+  span: number; // 栅格占用宽度
+}
+
+// 默认卡片配置
+const defaultCardConfigs: CardConfig[] = [
+  { id: 'cpu', title: 'CPU使用率', type: 'cpu', visible: true, span: 8 },
+  { id: 'memory', title: '内存使用', type: 'memory', visible: true, span: 8 },
+  { id: 'disk', title: '磁盘使用', type: 'disk', visible: true, span: 8 },
+  { id: 'network', title: '网络状态', type: 'network', visible: true, span: 24 },
+  { id: 'installedGames', title: '已安装游戏', type: 'installedGames', visible: true, span: 12 },
+  { id: 'runningGames', title: '正在运行的服务器', type: 'runningGames', visible: true, span: 12 },
+  { id: 'processes', title: '系统进程', type: 'processes', visible: true, span: 12 },
+  { id: 'ports', title: '活跃端口', type: 'ports', visible: true, span: 12 }
+];
+
 const ContainerInfo: React.FC<ContainerInfoProps> = ({
   onInstallGame,
   onStartServer,
@@ -104,6 +122,13 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
   const [ports, setPorts] = useState<PortInfo[]>([]);
   const [processLoading, setProcessLoading] = useState<boolean>(false);
   const [portLoading, setPortLoading] = useState<boolean>(false);
+  const [cardConfigs, setCardConfigs] = useState<CardConfig[]>(() => {
+    // 从localStorage加载配置，如果没有则使用默认配置
+    const saved = localStorage.getItem('containerInfo_cardConfigs');
+    return saved ? JSON.parse(saved) : defaultCardConfigs;
+  });
+  const [isDragMode, setIsDragMode] = useState<boolean>(false);
+  const [settingsVisible, setSettingsVisible] = useState<boolean>(false);
   const isMobile = useIsMobile(); // 检测是否为移动端
 
   const fetchContainerInfo = async () => {
@@ -249,6 +274,47 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
       console.error('结束进程失败:', error);
       message.error(error.response?.data?.message || '结束进程失败');
     }
+  };
+
+  // 保存卡片配置到localStorage
+  const saveCardConfigs = (configs: CardConfig[]) => {
+    localStorage.setItem('containerInfo_cardConfigs', JSON.stringify(configs));
+    setCardConfigs(configs);
+  };
+
+  // 处理拖拽结束
+  const handleDragEnd = (result: DropResult) => {
+    if (!result.destination) {
+      return;
+    }
+
+    const items = Array.from(cardConfigs);
+    const [reorderedItem] = items.splice(result.source.index, 1);
+    items.splice(result.destination.index, 0, reorderedItem);
+
+    saveCardConfigs(items);
+  };
+
+  // 切换卡片可见性
+  const toggleCardVisibility = (cardId: string) => {
+    const newConfigs = cardConfigs.map(config => 
+      config.id === cardId ? { ...config, visible: !config.visible } : config
+    );
+    saveCardConfigs(newConfigs);
+  };
+
+  // 更新卡片宽度
+  const updateCardSpan = (cardId: string, span: number) => {
+    const newConfigs = cardConfigs.map(config => 
+      config.id === cardId ? { ...config, span } : config
+    );
+    saveCardConfigs(newConfigs);
+  };
+
+  // 重置卡片配置
+  const resetCardConfigs = () => {
+    saveCardConfigs(defaultCardConfigs);
+    message.success('卡片布局已重置为默认配置');
   };
 
   // 显示结束进程确认对话框
@@ -566,6 +632,393 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
     ];
   };
 
+  // 渲染CPU卡片
+  const renderCpuCard = () => (
+    <Card 
+      title={<><HddOutlined /> CPU使用率</>} 
+      loading={loading} 
+      style={{marginBottom: isMobile ? 8 : 16, borderRadius: '8px', minHeight: isMobile ? 'auto' : '200px'}} 
+      size={isMobile ? "small" : "default"}
+    >
+      <Progress 
+        type="dashboard" 
+        percent={Math.round(systemInfo?.cpu_usage || 0)} 
+        status={systemInfo?.cpu_usage && systemInfo.cpu_usage > 80 ? 'exception' : 'normal'} 
+        format={percent => `${Math.round(percent || 0)}%`}
+        width={isMobile ? 80 : 120}
+      />
+      <Statistic title="使用率" value={`${Math.round(systemInfo?.cpu_usage || 0)}%`} />
+    </Card>
+  );
+
+  // 渲染内存卡片
+  const renderMemoryCard = () => (
+    <Card 
+      title={<><HddOutlined /> 内存使用</>} 
+      loading={loading} 
+      style={{marginBottom: isMobile ? 8 : 16, borderRadius: '8px', minHeight: isMobile ? 'auto' : '200px'}} 
+      size={isMobile ? "small" : "default"}
+    >
+      <Progress 
+        type="dashboard" 
+        percent={Math.round(systemInfo?.memory.percent || 0)} 
+        status={systemInfo?.memory.percent && systemInfo.memory.percent > 80 ? 'exception' : 'normal'} 
+        format={percent => `${Math.round(percent || 0)}%`}
+        width={isMobile ? 80 : 120}
+      />
+      <Statistic 
+        title="使用/总量" 
+        value={systemInfo ? formatGBPair(systemInfo.memory.used, systemInfo.memory.total) : '-'} 
+      />
+    </Card>
+  );
+
+  // 渲染磁盘卡片
+  const renderDiskCard = () => (
+    <Card 
+      title={<><HddOutlined /> 磁盘使用</>} 
+      loading={loading} 
+      style={{marginBottom: isMobile ? 8 : 16, borderRadius: '8px', minHeight: isMobile ? 'auto' : '200px'}} 
+      size={isMobile ? "small" : "default"}
+    >
+      <Progress 
+        type="dashboard" 
+        percent={Math.round(systemInfo?.disk.percent || 0)}
+        status={systemInfo?.disk.percent && systemInfo.disk.percent > 80 ? 'exception' : 'normal'} 
+        format={percent => `${Math.round(percent || 0)}%`}
+        width={isMobile ? 80 : 120}
+      />
+      <Statistic 
+        title="使用/总量" 
+        value={systemInfo ? formatGBPair(systemInfo.disk.used, systemInfo.disk.total) : '-'} 
+      />
+    </Card>
+  );
+
+  // 渲染网络卡片
+  const renderNetworkCard = () => (
+    <Card 
+      title={<><GlobalOutlined /> 网络状态</>} 
+      loading={loading}
+      style={{marginBottom: isMobile ? 8 : 16, borderRadius: '8px', minHeight: isMobile ? 'auto' : '200px'}}
+      size={isMobile ? "small" : "default"}
+    >
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <tbody>
+          {/* IPv4 状态行 */}
+          <tr>
+            <td style={{ padding: '12px 0', width: '80px', fontWeight: 'bold' }}>IPv4</td>
+            <td style={{ padding: '12px 0' }}>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <div style={{ 
+                  backgroundColor: '#f0f0f0', 
+                  width: '30px', 
+                  height: '30px', 
+                  borderRadius: '4px',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  marginRight: '10px'
+                }}>
+                  <GlobalOutlined style={{ color: '#1890ff' }} />
+                </div>
+                <div style={{ 
+                  flex: 1, 
+                  height: '3px', 
+                  backgroundColor: '#e8e8e8', 
+                  position: 'relative' 
+                }}>
+                  <div style={{ 
+                    position: 'absolute', 
+                    left: '25%', 
+                    top: '-8px', 
+                    width: '18px', 
+                    height: '18px', 
+                    borderRadius: '50%', 
+                    backgroundColor: '#1890ff',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    color: 'white',
+                    fontSize: '12px'
+                  }}>
+                    ✓
+                  </div>
+                  <div style={{ 
+                    position: 'absolute', 
+                    left: '60%', 
+                    top: '-8px', 
+                    width: '18px', 
+                    height: '18px', 
+                    borderRadius: '50%', 
+                    backgroundColor: '#1890ff',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    color: 'white',
+                    fontSize: '12px'
+                  }}>
+                    ✓
+                  </div>
+                  <div style={{ 
+                    position: 'absolute', 
+                    right: '0', 
+                    top: '-8px', 
+                    width: '18px', 
+                    height: '18px', 
+                    borderRadius: '50%', 
+                    backgroundColor: '#f0f0f0',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    color: '#1890ff',
+                    fontSize: '12px',
+                    border: '1px solid #1890ff'
+                  }}>
+                    <GlobalOutlined style={{ fontSize: '10px' }} />
+                  </div>
+                </div>
+              </div>
+            </td>
+          </tr>
+          
+          {/* IPv4地址行 */}
+          <tr>
+            <td style={{ padding: '12px 0', fontWeight: 'bold' }}>IPv4公网地址</td>
+            <td style={{ padding: '12px 0' }}>
+              {systemInfo?.network?.public_ip?.ipv4 || '未获取到'}
+            </td>
+          </tr>
+          
+          {/* IPv6 状态行 */}
+          <tr>
+            <td style={{ padding: '12px 0', width: '80px', fontWeight: 'bold' }}>IPv6</td>
+            <td style={{ padding: '12px 0' }}>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <div style={{ 
+                  backgroundColor: '#f0f0f0', 
+                  width: '30px', 
+                  height: '30px', 
+                  borderRadius: '4px',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  marginRight: '10px'
+                }}>
+                  <GlobalOutlined style={{ color: systemInfo?.network?.public_ip?.ipv6 ? '#1890ff' : '#ff4d4f' }} />
+                </div>
+                <div style={{ 
+                  flex: 1, 
+                  height: '3px', 
+                  backgroundColor: '#e8e8e8', 
+                  position: 'relative' 
+                }}>
+                  {systemInfo?.network?.public_ip?.ipv6 ? (
+                    <>
+                      <div style={{ 
+                        position: 'absolute', 
+                        left: '50%', 
+                        top: '-8px', 
+                        width: '18px', 
+                        height: '18px', 
+                        borderRadius: '50%', 
+                        backgroundColor: '#1890ff',
+                        display: 'flex',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        color: 'white',
+                        fontSize: '12px'
+                      }}>
+                        ✓
+                      </div>
+                      <div style={{ 
+                        position: 'absolute', 
+                        right: '0', 
+                        top: '-8px', 
+                        width: '18px', 
+                        height: '18px', 
+                        borderRadius: '50%', 
+                        backgroundColor: '#f0f0f0',
+                        display: 'flex',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        color: '#1890ff',
+                        fontSize: '12px',
+                        border: '1px solid #1890ff'
+                      }}>
+                        <GlobalOutlined style={{ fontSize: '10px' }} />
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ 
+                      position: 'absolute', 
+                      left: '50%', 
+                      top: '-8px', 
+                      width: '18px', 
+                      height: '18px', 
+                      borderRadius: '50%', 
+                      backgroundColor: '#ff4d4f',
+                      display: 'flex',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      color: 'white',
+                      fontSize: '12px'
+                    }}>
+                      ✗
+                    </div>
+                  )}
+                </div>
+              </div>
+            </td>
+          </tr>
+          
+          {/* IPv6地址行 */}
+          <tr>
+            <td style={{ padding: '12px 0', fontWeight: 'bold' }}>IPv6公网地址</td>
+            <td style={{ padding: '12px 0' }}>
+              {systemInfo?.network?.public_ip?.ipv6 || '未获取到'}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </Card>
+  );
+
+  // 渲染已安装游戏卡片
+  const renderInstalledGamesCard = () => (
+    <Card 
+      title={<><AppstoreOutlined /> 已安装游戏 ({installedGames.length})</>} 
+      extra={<Tag color="blue">{formatSize(installedGames.reduce((acc, game) => acc + (game.size_mb || 0), 0))}</Tag>}
+      loading={loading}
+      style={{marginBottom: isMobile ? 8 : 16, borderRadius: '8px', minHeight: isMobile ? 'auto' : '200px'}}
+      size={isMobile ? "small" : "default"}
+    >
+      <Table 
+        dataSource={installedGames} 
+        columns={isMobile ? getMobileInstalledGamesColumns() : installedGamesColumns} 
+        rowKey="id"
+        pagination={false}
+        size={isMobile ? "small" : "default"}
+        locale={{ emptyText: '暂无已安装游戏' }}
+        scroll={isMobile ? { x: '100%' } : undefined}
+      />
+    </Card>
+  );
+
+  // 渲染正在运行的服务器卡片
+  const renderRunningGamesCard = () => (
+    <Card 
+      title={<><RocketOutlined /> 正在运行的服务器 ({runningGames.length})</>}
+      loading={loading}
+      style={{marginBottom: isMobile ? 8 : 16, borderRadius: '8px', minHeight: isMobile ? 'auto' : '200px'}}
+      size={isMobile ? "small" : "default"}
+    >
+      <Table 
+        dataSource={runningGames} 
+        columns={isMobile ? getMobileRunningGamesColumns() : runningGamesColumns} 
+        rowKey="id"
+        pagination={false}
+        size={isMobile ? "small" : "default"}
+        locale={{ emptyText: '暂无正在运行的服务器' }}
+        scroll={isMobile ? { x: '100%' } : undefined}
+      />
+    </Card>
+  );
+
+  // 渲染系统进程卡片
+  const renderProcessesCard = () => (
+    <Card 
+      title={<><DesktopOutlined /> 系统进程 ({processes.length})</>}
+      extra={
+        <Button 
+          size="small" 
+          icon={<ReloadOutlined />} 
+          onClick={fetchProcesses}
+          loading={processLoading}
+        >
+          刷新
+        </Button>
+      }
+      loading={processLoading}
+      style={{marginBottom: isMobile ? 8 : 16, borderRadius: '8px', minHeight: isMobile ? 'auto' : '200px'}}
+      size={isMobile ? "small" : "default"}
+    >
+      <Table 
+        dataSource={processes} 
+        columns={isMobile ? getMobileProcessColumns() : processColumns} 
+        rowKey="pid"
+        pagination={{
+          pageSize: isMobile ? 5 : 10,
+          showSizeChanger: false,
+          showQuickJumper: false,
+          size: 'small'
+        }}
+        size={isMobile ? "small" : "default"}
+        locale={{ emptyText: '暂无进程信息' }}
+        scroll={isMobile ? { x: '100%' } : { y: 300 }}
+      />
+    </Card>
+  );
+
+  // 渲染活跃端口卡片
+  const renderPortsCard = () => (
+    <Card 
+      title={<><ApiOutlined /> 活跃端口 ({ports.length})</>}
+      extra={
+        <Button 
+          size="small" 
+          icon={<ReloadOutlined />} 
+          onClick={fetchPorts}
+          loading={portLoading}
+        >
+          刷新
+        </Button>
+      }
+      loading={portLoading}
+      style={{marginBottom: isMobile ? 8 : 16, borderRadius: '8px', minHeight: isMobile ? 'auto' : '200px'}}
+      size={isMobile ? "small" : "default"}
+    >
+      <Table 
+        dataSource={ports} 
+        columns={isMobile ? getMobilePortColumns() : portColumns} 
+        rowKey={(record) => `${record.port}-${record.address}`}
+        pagination={{
+          pageSize: isMobile ? 5 : 10,
+          showSizeChanger: false,
+          showQuickJumper: false,
+          size: 'small'
+        }}
+        size={isMobile ? "small" : "default"}
+        locale={{ emptyText: '暂无端口信息' }}
+        scroll={isMobile ? { x: '100%' } : { y: 300 }}
+      />
+    </Card>
+  );
+
+  // 根据卡片类型渲染对应的卡片
+  const renderCard = (config: CardConfig) => {
+    switch (config.type) {
+      case 'cpu':
+        return renderCpuCard();
+      case 'memory':
+        return renderMemoryCard();
+      case 'disk':
+        return renderDiskCard();
+      case 'network':
+        return renderNetworkCard();
+      case 'installedGames':
+        return renderInstalledGamesCard();
+      case 'runningGames':
+        return renderRunningGamesCard();
+      case 'processes':
+        return renderProcessesCard();
+      case 'ports':
+        return renderPortsCard();
+      default:
+        return null;
+    }
+  };
+
   // 渲染简单的网络流量图表
   const renderNetworkChart = (data: number[], color: string) => {
     if (data.length < 2) return null;
@@ -777,15 +1230,32 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
         <Paragraph>
           查看容器资源占用情况、已安装游戏和正在运行的游戏服务器
         </Paragraph>
-        <Button
-          type="primary"
-          icon={<ReloadOutlined />}
-          onClick={fetchContainerInfo}
-          loading={loading}
-          size={isMobile ? "small" : "middle"}
-        >
-          刷新信息
-        </Button>
+        <Space>
+          <Button
+            type="primary"
+            icon={<ReloadOutlined />}
+            onClick={fetchContainerInfo}
+            loading={loading}
+            size={isMobile ? "small" : "middle"}
+          >
+            刷新信息
+          </Button>
+          <Button 
+            icon={isDragMode ? <SettingOutlined /> : <DragOutlined />} 
+            onClick={() => setIsDragMode(!isDragMode)}
+            type={isDragMode ? "primary" : "default"}
+            size={isMobile ? "small" : "middle"}
+          >
+            {isDragMode ? '完成布局' : '自定义布局'}
+          </Button>
+          <Button 
+            icon={<SettingOutlined />} 
+            onClick={() => setSettingsVisible(true)}
+            size={isMobile ? "small" : "middle"}
+          >
+            卡片设置
+          </Button>
+        </Space>
       </div>
 
       {hasHighResourceUsage() && (
@@ -799,373 +1269,184 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
         />
       )}
 
-      <Divider />
-
-      <Row gutter={isMobile ? 8 : 16} className="resource-cards">
-        <Col xs={24} sm={24} md={8}>
-          <Card title={<><HddOutlined /> CPU使用率</>} loading={loading} style={{marginBottom: isMobile ? 8 : 0, borderRadius: '8px'}} size={isMobile ? "small" : "default"}>
-            <Progress 
-              type="dashboard" 
-              percent={Math.round(systemInfo?.cpu_usage || 0)} 
-              status={systemInfo?.cpu_usage && systemInfo.cpu_usage > 80 ? 'exception' : 'normal'} 
-              format={percent => `${Math.round(percent || 0)}%`}
-              width={isMobile ? 80 : 120}
-            />
-            <Statistic title="使用率" value={`${Math.round(systemInfo?.cpu_usage || 0)}%`} />
-            {systemInfo?.cpu_model && (
-              <div style={{ marginTop: 8 }}>
-                <div><strong>CPU型号:</strong> {systemInfo.cpu_model}</div>
-                <div><strong>核心数:</strong> {systemInfo.cpu_cores || 0} 物理核心 / {systemInfo.cpu_logical_cores || 0} 逻辑核心</div>
-              </div>
-            )}
-          </Card>
-        </Col>
-        <Col xs={24} sm={24} md={8}>
-          <Card title={<><HddOutlined /> 内存使用</>} loading={loading} style={{marginBottom: isMobile ? 8 : 0, borderRadius: '8px'}} size={isMobile ? "small" : "default"}>
-            <Progress 
-              type="dashboard" 
-              percent={Math.round(systemInfo?.memory.percent || 0)} 
-              status={systemInfo?.memory.percent && systemInfo.memory.percent > 80 ? 'exception' : 'normal'} 
-              format={percent => `${Math.round(percent || 0)}%`}
-              width={isMobile ? 80 : 120}
-            />
-            <Statistic 
-              title="使用/总量" 
-              value={systemInfo ? formatGBPair(systemInfo.memory.used, systemInfo.memory.total) : '-'} 
-            />
-            {systemInfo?.memory.frequency && (
-              <div style={{ marginTop: 8 }}>
-                <div><strong>内存频率:</strong> {systemInfo.memory.frequency}</div>
-              </div>
-            )}
-          </Card>
-        </Col>
-        <Col xs={24} sm={24} md={8}>
-          <Card title={<><HddOutlined /> 磁盘使用</>} loading={loading} style={{marginBottom: isMobile ? 8 : 0, borderRadius: '8px'}} size={isMobile ? "small" : "default"}>
-            <Progress 
-              type="dashboard" 
-              percent={Math.round(systemInfo?.disk.percent || 0)}
-              status={systemInfo?.disk.percent && systemInfo.disk.percent > 80 ? 'exception' : 'normal'} 
-              format={percent => `${Math.round(percent || 0)}%`}
-              width={isMobile ? 80 : 120}
-            />
-            <Statistic 
-              title="使用/总量" 
-              value={systemInfo ? formatGBPair(systemInfo.disk.used, systemInfo.disk.total) : '-'} 
-            />
-            <div style={{ marginTop: 8 }}>
-              <div>&nbsp;</div>
-            </div>
-          </Card>
-        </Col>
-      </Row>
+      {isDragMode && (
+        <Alert
+          message="拖拽模式"
+          description="您现在可以拖拽卡片来重新排列它们的位置。拖拽完成后点击'完成布局'按钮保存更改。"
+          type="info"
+          showIcon
+          style={{ marginTop: 16, marginBottom: 16 }}
+        />
+      )}
 
       <Divider />
-      
-      {/* 网络状态卡片 */}
-      <Row gutter={isMobile ? 8 : 16} className="network-cards">
-        <Col xs={24}>
-          <Card 
-            title={<><GlobalOutlined /> 网络状态</>} 
-            loading={loading}
-            style={{marginBottom: isMobile ? 8 : 16, borderRadius: '8px'}}
-            size={isMobile ? "small" : "default"}
-          >
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <tbody>
-                {/* IPv4 状态行 */}
-                <tr>
-                  <td style={{ padding: '12px 0', width: '80px', fontWeight: 'bold' }}>IPv4</td>
-                  <td style={{ padding: '12px 0' }}>
-                    <div style={{ display: 'flex', alignItems: 'center' }}>
-                      <div style={{ 
-                        backgroundColor: '#f0f0f0', 
-                        width: '30px', 
-                        height: '30px', 
-                        borderRadius: '4px',
-                        display: 'flex',
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                        marginRight: '10px'
-                      }}>
-                        <GlobalOutlined style={{ color: '#1890ff' }} />
-                      </div>
-                      <div style={{ 
-                        flex: 1, 
-                        height: '3px', 
-                        backgroundColor: '#e8e8e8', 
-                        position: 'relative' 
-                      }}>
-                        <div style={{ 
-                          position: 'absolute', 
-                          left: '25%', 
-                          top: '-8px', 
-                          width: '18px', 
-                          height: '18px', 
-                          borderRadius: '50%', 
-                          backgroundColor: '#1890ff',
-                          display: 'flex',
-                          justifyContent: 'center',
-                          alignItems: 'center',
-                          color: 'white',
-                          fontSize: '12px'
-                        }}>
-                          ✓
-                        </div>
-                        <div style={{ 
-                          position: 'absolute', 
-                          left: '60%', 
-                          top: '-8px', 
-                          width: '18px', 
-                          height: '18px', 
-                          borderRadius: '50%', 
-                          backgroundColor: '#1890ff',
-                          display: 'flex',
-                          justifyContent: 'center',
-                          alignItems: 'center',
-                          color: 'white',
-                          fontSize: '12px'
-                        }}>
-                          ✓
-                        </div>
-                        <div style={{ 
-                          position: 'absolute', 
-                          right: '0', 
-                          top: '-8px', 
-                          width: '18px', 
-                          height: '18px', 
-                          borderRadius: '50%', 
-                          backgroundColor: '#f0f0f0',
-                          display: 'flex',
-                          justifyContent: 'center',
-                          alignItems: 'center',
-                          color: '#1890ff',
-                          fontSize: '12px',
-                          border: '1px solid #1890ff'
-                        }}>
-                          <GlobalOutlined style={{ fontSize: '10px' }} />
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-                
-                {/* IPv4地址行 */}
-                <tr>
-                  <td style={{ padding: '12px 0', fontWeight: 'bold' }}>IPv4公网地址</td>
-                  <td style={{ padding: '12px 0' }}>
-                    {systemInfo?.network?.public_ip?.ipv4 || '未获取到'}
-                  </td>
-                </tr>
-                
-                {/* IPv6 状态行 */}
-                <tr>
-                  <td style={{ padding: '12px 0', width: '80px', fontWeight: 'bold' }}>IPv6</td>
-                  <td style={{ padding: '12px 0' }}>
-                    <div style={{ display: 'flex', alignItems: 'center' }}>
-                      <div style={{ 
-                        backgroundColor: '#f0f0f0', 
-                        width: '30px', 
-                        height: '30px', 
-                        borderRadius: '4px',
-                        display: 'flex',
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                        marginRight: '10px'
-                      }}>
-                        <GlobalOutlined style={{ color: systemInfo?.network?.public_ip?.ipv6 ? '#1890ff' : '#ff4d4f' }} />
-                      </div>
-                      <div style={{ 
-                        flex: 1, 
-                        height: '3px', 
-                        backgroundColor: '#e8e8e8', 
-                        position: 'relative' 
-                      }}>
-                        {systemInfo?.network?.public_ip?.ipv6 ? (
-                          <>
-                            <div style={{ 
-                              position: 'absolute', 
-                              left: '50%', 
-                              top: '-8px', 
-                              width: '18px', 
-                              height: '18px', 
-                              borderRadius: '50%', 
-                              backgroundColor: '#1890ff',
-                              display: 'flex',
-                              justifyContent: 'center',
-                              alignItems: 'center',
-                              color: 'white',
-                              fontSize: '12px'
-                            }}>
-                              ✓
+
+      <DragDropContext onDragEnd={handleDragEnd}>
+        <Droppable droppableId="cards" direction="vertical">
+          {(provided) => (
+            <div {...provided.droppableProps} ref={provided.innerRef}>
+              <Row gutter={isMobile ? 8 : 16}>
+                {cardConfigs
+                  .filter(config => config.visible)
+                  .map((config, index) => {
+                    // 根据卡片类型确定栅格布局
+                    const getColSpan = () => {
+                      if (isMobile) return 24;
+                      return config.span;
+                    };
+
+                    return (
+                      <Draggable 
+                        key={config.id} 
+                        draggableId={config.id} 
+                        index={index}
+                        isDragDisabled={!isDragMode}
+                      >
+                        {(provided, snapshot) => (
+                          <Col 
+                            span={getColSpan()}
+                            style={{
+                              marginBottom: 16
+                            }}
+                          >
+                            <div
+                              ref={provided.innerRef}
+                              {...provided.draggableProps}
+                              style={{
+                                height: '100%',
+                                ...provided.draggableProps.style,
+                                transform: snapshot.isDragging 
+                                  ? provided.draggableProps.style?.transform 
+                                  : 'none'
+                              }}
+                            >
+                              <div 
+                                style={{
+                                  position: 'relative',
+                                  height: '100%',
+                                  border: isDragMode ? '2px dashed #d9d9d9' : 'none',
+                                  borderRadius: '8px',
+                                  padding: isDragMode ? '8px' : '0',
+                                  backgroundColor: snapshot.isDragging ? '#f0f0f0' : 'transparent'
+                                }}
+                              >
+                                {isDragMode && (
+                                  <div 
+                                    {...provided.dragHandleProps}
+                                    style={{
+                                      position: 'absolute',
+                                      top: '16px',
+                                      right: '16px',
+                                      zIndex: 1000,
+                                      cursor: 'grab',
+                                      padding: '4px',
+                                      backgroundColor: '#1890ff',
+                                      color: 'white',
+                                      borderRadius: '4px',
+                                      fontSize: '12px'
+                                    }}
+                                  >
+                                    <DragOutlined />
+                                  </div>
+                                )}
+                                {renderCard(config)}
+                              </div>
                             </div>
-                            <div style={{ 
-                              position: 'absolute', 
-                              right: '0', 
-                              top: '-8px', 
-                              width: '18px', 
-                              height: '18px', 
-                              borderRadius: '50%', 
-                              backgroundColor: '#f0f0f0',
-                              display: 'flex',
-                              justifyContent: 'center',
-                              alignItems: 'center',
-                              color: '#1890ff',
-                              fontSize: '12px',
-                              border: '1px solid #1890ff'
-                            }}>
-                              <GlobalOutlined style={{ fontSize: '10px' }} />
-                            </div>
-                          </>
-                        ) : (
-                          <div style={{ 
-                            position: 'absolute', 
-                            left: '50%', 
-                            top: '-8px', 
-                            width: '18px', 
-                            height: '18px', 
-                            borderRadius: '50%', 
-                            backgroundColor: '#ff4d4f',
-                            display: 'flex',
-                            justifyContent: 'center',
-                            alignItems: 'center',
-                            color: 'white',
-                            fontSize: '12px'
-                          }}>
-                            ✗
-                          </div>
+                          </Col>
                         )}
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-                
-                {/* IPv6地址行 */}
-                <tr>
-                  <td style={{ padding: '12px 0', fontWeight: 'bold' }}>IPv6公网地址</td>
-                  <td style={{ padding: '12px 0' }}>
-                    {systemInfo?.network?.public_ip?.ipv6 || '未获取到'}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </Card>
-        </Col>
-      </Row>
+                      </Draggable>
+                    );
+                  })
+                }
+              </Row>
+              {provided.placeholder}
+            </div>
+          )}
+        </Droppable>
+      </DragDropContext>
 
-      <Divider />
-
-      <Row gutter={isMobile ? 8 : 16} className="games-tables">
-        <Col xs={24} sm={24} md={12}>
-          <Card 
-            title={<><AppstoreOutlined /> 已安装游戏 ({installedGames.length})</>} 
-            extra={<Tag color="blue">{formatSize(installedGames.reduce((acc, game) => acc + (game.size_mb || 0), 0))}</Tag>}
-            loading={loading}
-            style={{marginBottom: isMobile ? 8 : 0, borderRadius: '8px'}}
-            size={isMobile ? "small" : "default"}
-          >
-            <Table 
-              dataSource={installedGames} 
-              columns={isMobile ? getMobileInstalledGamesColumns() : installedGamesColumns} 
-              rowKey="id"
-              pagination={false}
-              size={isMobile ? "small" : "default"}
-              locale={{ emptyText: '暂无已安装游戏' }}
-              scroll={isMobile ? { x: '100%' } : undefined}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={24} md={12}>
-          <Card 
-            title={<><RocketOutlined /> 正在运行的服务器 ({runningGames.length})</>}
-            loading={loading}
-            style={{marginBottom: isMobile ? 8 : 0, borderRadius: '8px'}}
-            size={isMobile ? "small" : "default"}
-          >
-            <Table 
-              dataSource={runningGames} 
-              columns={isMobile ? getMobileRunningGamesColumns() : runningGamesColumns} 
-              rowKey="id"
-              pagination={false}
-              size={isMobile ? "small" : "default"}
-              locale={{ emptyText: '暂无正在运行的服务器' }}
-              scroll={isMobile ? { x: '100%' } : undefined}
-            />
-          </Card>
-        </Col>
-      </Row>
-
-      <Divider />
-
-      {/* 进程管理和端口监控 */}
-      <Row gutter={isMobile ? 8 : 16} className="system-monitoring">
-        <Col xs={24} sm={24} md={12}>
-          <Card 
-            title={<><DesktopOutlined /> 系统进程 ({processes.length})</>}
-            extra={
-              <Button 
-                size="small" 
-                icon={<ReloadOutlined />} 
-                onClick={fetchProcesses}
-                loading={processLoading}
-              >
-                刷新
-              </Button>
-            }
-            loading={processLoading}
-            style={{marginBottom: isMobile ? 8 : 0, borderRadius: '8px'}}
-            size={isMobile ? "small" : "default"}
-          >
-            <Table 
-              dataSource={processes} 
-              columns={isMobile ? getMobileProcessColumns() : processColumns} 
-              rowKey="pid"
-              pagination={{
-                pageSize: isMobile ? 5 : 10,
-                showSizeChanger: false,
-                showQuickJumper: false,
-                size: 'small'
+      {/* 卡片设置模态框 */}
+      <Modal
+        title="卡片显示设置"
+        open={settingsVisible}
+        onCancel={() => setSettingsVisible(false)}
+        footer={[
+          <Button key="reset" onClick={resetCardConfigs}>
+            重置为默认
+          </Button>,
+          <Button key="close" type="primary" onClick={() => setSettingsVisible(false)}>
+            关闭
+          </Button>
+        ]}
+        width={600}
+      >
+        <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+          {cardConfigs.map(config => (
+            <div 
+              key={config.id} 
+              style={{ 
+                padding: '16px 0',
+                borderBottom: '1px solid #f0f0f0'
               }}
-              size={isMobile ? "small" : "default"}
-              locale={{ emptyText: '暂无进程信息' }}
-              scroll={isMobile ? { x: '100%' } : { y: 300 }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={24} md={12}>
-          <Card 
-            title={<><ApiOutlined /> 活跃端口 ({ports.length})</>}
-            extra={
-              <Button 
-                size="small" 
-                icon={<ReloadOutlined />} 
-                onClick={fetchPorts}
-                loading={portLoading}
-              >
-                刷新
-              </Button>
-            }
-            loading={portLoading}
-            style={{marginBottom: isMobile ? 8 : 0, borderRadius: '8px'}}
-            size={isMobile ? "small" : "default"}
-          >
-            <Table 
-              dataSource={ports} 
-              columns={isMobile ? getMobilePortColumns() : portColumns} 
-              rowKey={(record) => `${record.port}-${record.address}`}
-              pagination={{
-                pageSize: isMobile ? 5 : 10,
-                showSizeChanger: false,
-                showQuickJumper: false,
-                size: 'small'
-              }}
-              size={isMobile ? "small" : "default"}
-              locale={{ emptyText: '暂无端口信息' }}
-              scroll={isMobile ? { x: '100%' } : { y: 300 }}
-            />
-          </Card>
-        </Col>
-      </Row>
+            >
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center',
+                marginBottom: '12px'
+              }}>
+                <span style={{ fontWeight: config.visible ? 'normal' : '300', color: config.visible ? '#000' : '#999' }}>
+                  {config.title}
+                </span>
+                <Button
+                  size="small"
+                  type={config.visible ? "primary" : "default"}
+                  onClick={() => toggleCardVisibility(config.id)}
+                >
+                  {config.visible ? '隐藏' : '显示'}
+                </Button>
+              </div>
+              {config.visible && !isMobile && (
+                <div style={{ paddingLeft: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span style={{ fontSize: '12px', color: '#666', minWidth: '60px' }}>宽度:</span>
+                    <Slider
+                      min={6}
+                      max={24}
+                      step={2}
+                      value={config.span}
+                      onChange={(value) => updateCardSpan(config.id, value)}
+                      style={{ flex: 1 }}
+                      marks={{
+                        6: '1/4',
+                        8: '1/3', 
+                        12: '1/2',
+                        16: '2/3',
+                        24: '全宽'
+                      }}
+                    />
+                    <span style={{ fontSize: '12px', color: '#999', minWidth: '40px' }}>{config.span}/24</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: 16, padding: '12px', backgroundColor: '#f9f9f9', borderRadius: '4px' }}>
+          <p style={{ margin: 0, fontSize: '12px', color: '#666' }}>
+            💡 提示：
+          </p>
+          <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#666' }}>
+            • 点击"自定义布局"按钮可以拖拽重新排列卡片顺序
+          </p>
+          <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#666' }}>
+            • 调整宽度滑块可以控制卡片在同一行的并排显示
+          </p>
+          <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#666' }}>
+            • 宽度值越小，同一行可以并排显示的卡片越多
+          </p>
+        </div>
+      </Modal>
     </div>
   );
 };
