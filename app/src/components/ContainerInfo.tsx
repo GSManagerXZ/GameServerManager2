@@ -1315,6 +1315,8 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
                               style={{
                                 height: '100%',
                                 ...provided.draggableProps.style,
+                                left: snapshot.isDragging ? 'auto !important' : provided.draggableProps.style?.left,
+                                top: snapshot.isDragging ? 'auto !important' : provided.draggableProps.style?.top,
                                 transform: snapshot.isDragging 
                                   ? provided.draggableProps.style?.transform 
                                   : 'none'
