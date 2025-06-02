@@ -179,7 +179,442 @@ def is_public_route(path):
     ]
     return path in public_routes
 
+# 代理配置应用函数
+def apply_proxy_config(proxy_config):
+    """应用系统级别的代理配置"""
+    try:
+        if proxy_config.get('enabled', False):
+            host = proxy_config.get('host', '')
+            port = proxy_config.get('port', 8080)
+            username = proxy_config.get('username', '')
+            password = proxy_config.get('password', '')
+            proxy_type = proxy_config.get('type', 'http')
+            no_proxy = proxy_config.get('no_proxy', '')
+            
+            # 构建代理URL
+            if username and password:
+                proxy_url = f"{proxy_type}://{username}:{password}@{host}:{port}"
+            else:
+                proxy_url = f"{proxy_type}://{host}:{port}"
+            
+            # 1. 设置环境变量（应用程序级别）
+            os.environ['HTTP_PROXY'] = proxy_url
+            os.environ['HTTPS_PROXY'] = proxy_url
+            os.environ['http_proxy'] = proxy_url
+            os.environ['https_proxy'] = proxy_url
+            os.environ['ALL_PROXY'] = proxy_url
+            os.environ['all_proxy'] = proxy_url
+            
+            if no_proxy:
+                os.environ['NO_PROXY'] = no_proxy
+                os.environ['no_proxy'] = no_proxy
+            
+            # 2. 配置系统级别代理
+            _configure_system_proxy(proxy_config)
+            
+            # 3. 配置APT代理（如果是Debian/Ubuntu系统）
+            _configure_apt_proxy(proxy_config)
+            
+            # 4. 写入全局环境配置文件
+            _write_global_proxy_config(proxy_config)
+            
+            logger.info(f"已应用系统级别代理配置: {proxy_type}://{host}:{port}")
+        else:
+            # 清除所有代理配置
+            _clear_all_proxy_config()
+            logger.info("已清除所有代理配置")
+            
+    except Exception as e:
+        logger.error(f"应用代理配置时出错: {str(e)}")
+
+def _configure_system_proxy(proxy_config):
+    """配置系统级别代理"""
+    try:
+        host = proxy_config.get('host', '')
+        port = proxy_config.get('port', 8080)
+        username = proxy_config.get('username', '')
+        password = proxy_config.get('password', '')
+        proxy_type = proxy_config.get('type', 'http')
+        
+        # 构建代理URL
+        if username and password:
+            proxy_url = f"{proxy_type}://{username}:{password}@{host}:{port}"
+        else:
+            proxy_url = f"{proxy_type}://{host}:{port}"
+        
+        # 配置系统代理（通过gsettings，适用于GNOME桌面环境）
+        # 检查是否有桌面环境
+        if os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'):
+            try:
+                if proxy_type.lower() in ['http', 'https']:
+                    subprocess.run(['gsettings', 'set', 'org.gnome.system.proxy.http', 'host', host], check=False, stderr=subprocess.DEVNULL)
+                    subprocess.run(['gsettings', 'set', 'org.gnome.system.proxy.http', 'port', str(port)], check=False, stderr=subprocess.DEVNULL)
+                    if username and password:
+                        subprocess.run(['gsettings', 'set', 'org.gnome.system.proxy.http', 'authentication-user', username], check=False, stderr=subprocess.DEVNULL)
+                        subprocess.run(['gsettings', 'set', 'org.gnome.system.proxy.http', 'authentication-password', password], check=False, stderr=subprocess.DEVNULL)
+                        subprocess.run(['gsettings', 'set', 'org.gnome.system.proxy.http', 'use-authentication', 'true'], check=False, stderr=subprocess.DEVNULL)
+                    
+                    subprocess.run(['gsettings', 'set', 'org.gnome.system.proxy', 'mode', 'manual'], check=False, stderr=subprocess.DEVNULL)
+                elif proxy_type.lower() == 'socks5':
+                    subprocess.run(['gsettings', 'set', 'org.gnome.system.proxy.socks', 'host', host], check=False, stderr=subprocess.DEVNULL)
+                    subprocess.run(['gsettings', 'set', 'org.gnome.system.proxy.socks', 'port', str(port)], check=False, stderr=subprocess.DEVNULL)
+                    subprocess.run(['gsettings', 'set', 'org.gnome.system.proxy', 'mode', 'manual'], check=False, stderr=subprocess.DEVNULL)
+                logger.info("已配置GNOME系统代理")
+            except Exception as e:
+                logger.warning(f"配置GNOME系统代理失败: {str(e)}")
+        else:
+            logger.info("无桌面环境，跳过GNOME系统代理配置")
+        
+        # 配置iptables透明代理（需要root权限）
+        try:
+            if proxy_type.lower() == 'socks5':
+                _configure_transparent_proxy(host, port)
+        except Exception as e:
+            logger.warning(f"配置透明代理失败: {str(e)}")
+            
+    except Exception as e:
+        logger.error(f"配置系统代理时出错: {str(e)}")
+
+def _configure_transparent_proxy(proxy_host, proxy_port):
+    """配置透明代理（使用iptables和redsocks）"""
+    try:
+        # 检查是否有redsocks
+        redsocks_config = f"""
+base {{
+    log_debug = off;
+    log_info = on;
+    log = "file:/tmp/redsocks.log";
+    daemon = on;
+    redirector = iptables;
+}}
+
+redsocks {{
+    local_ip = 127.0.0.1;
+    local_port = 12345;
+    ip = {proxy_host};
+    port = {proxy_port};
+    type = socks5;
+}}
+"""
+        
+        # 写入redsocks配置
+        with open('/tmp/redsocks.conf', 'w') as f:
+            f.write(redsocks_config)
+        
+        # 启动redsocks（如果存在）
+        try:
+            subprocess.run(['pkill', 'redsocks'], check=False)
+            subprocess.run(['redsocks', '-c', '/tmp/redsocks.conf'], check=False)
+        except FileNotFoundError:
+            logger.warning("redsocks未安装，跳过透明代理配置")
+            return
+        
+        # 配置iptables规则
+        iptables_rules = [
+            # 创建新链
+            ['iptables', '-t', 'nat', '-N', 'REDSOCKS'],
+            # 忽略本地和代理服务器的流量
+            ['iptables', '-t', 'nat', '-A', 'REDSOCKS', '-d', '127.0.0.0/8', '-j', 'RETURN'],
+            ['iptables', '-t', 'nat', '-A', 'REDSOCKS', '-d', proxy_host, '-j', 'RETURN'],
+            # 忽略局域网流量
+            ['iptables', '-t', 'nat', '-A', 'REDSOCKS', '-d', '10.0.0.0/8', '-j', 'RETURN'],
+            ['iptables', '-t', 'nat', '-A', 'REDSOCKS', '-d', '172.16.0.0/12', '-j', 'RETURN'],
+            ['iptables', '-t', 'nat', '-A', 'REDSOCKS', '-d', '192.168.0.0/16', '-j', 'RETURN'],
+            # 重定向其他流量到redsocks
+            ['iptables', '-t', 'nat', '-A', 'REDSOCKS', '-p', 'tcp', '-j', 'REDIRECT', '--to-ports', '12345'],
+            # 应用规则到OUTPUT链
+            ['iptables', '-t', 'nat', '-A', 'OUTPUT', '-p', 'tcp', '-j', 'REDSOCKS']
+        ]
+        
+        for rule in iptables_rules:
+            try:
+                subprocess.run(rule, check=False)
+            except Exception as e:
+                logger.warning(f"执行iptables规则失败: {' '.join(rule)}, 错误: {str(e)}")
+                
+    except Exception as e:
+        logger.error(f"配置透明代理时出错: {str(e)}")
+
+def _configure_apt_proxy(proxy_config):
+    """配置APT代理"""
+    try:
+        host = proxy_config.get('host', '')
+        port = proxy_config.get('port', 8080)
+        username = proxy_config.get('username', '')
+        password = proxy_config.get('password', '')
+        proxy_type = proxy_config.get('type', 'http')
+        
+        if proxy_type.lower() in ['http', 'https']:
+            # 构建代理URL
+            if username and password:
+                proxy_url = f"http://{username}:{password}@{host}:{port}"
+            else:
+                proxy_url = f"http://{host}:{port}"
+            
+            apt_proxy_config = f"""
+Acquire::http::Proxy "{proxy_url}";
+Acquire::https::Proxy "{proxy_url}";
+"""
+            
+            # 写入APT代理配置
+            os.makedirs('/etc/apt/apt.conf.d', exist_ok=True)
+            with open('/etc/apt/apt.conf.d/95proxy', 'w') as f:
+                f.write(apt_proxy_config)
+            
+            logger.info("已配置APT代理")
+            
+    except Exception as e:
+        logger.warning(f"配置APT代理失败: {str(e)}")
+
+def _configure_git_proxy(proxy_config):
+    """配置Git代理"""
+    try:
+        host = proxy_config.get('host', '')
+        port = proxy_config.get('port', 8080)
+        username = proxy_config.get('username', '')
+        password = proxy_config.get('password', '')
+        proxy_type = proxy_config.get('type', 'http')
+        
+        # 构建代理URL
+        if username and password:
+            proxy_url = f"{proxy_type}://{username}:{password}@{host}:{port}"
+        else:
+            proxy_url = f"{proxy_type}://{host}:{port}"
+        
+        # 配置Git全局代理
+        if proxy_type.lower() in ['http', 'https']:
+            subprocess.run(['git', 'config', '--global', 'http.proxy', proxy_url], check=False)
+            subprocess.run(['git', 'config', '--global', 'https.proxy', proxy_url], check=False)
+        elif proxy_type.lower() == 'socks5':
+            subprocess.run(['git', 'config', '--global', 'http.proxy', proxy_url], check=False)
+            subprocess.run(['git', 'config', '--global', 'https.proxy', proxy_url], check=False)
+        
+        logger.info("已配置Git代理")
+        
+    except Exception as e:
+        logger.warning(f"配置Git代理失败: {str(e)}")
+
+def _write_global_proxy_config(proxy_config):
+    """写入全局环境配置文件"""
+    try:
+        host = proxy_config.get('host', '')
+        port = proxy_config.get('port', 8080)
+        username = proxy_config.get('username', '')
+        password = proxy_config.get('password', '')
+        proxy_type = proxy_config.get('type', 'http')
+        no_proxy = proxy_config.get('no_proxy', '')
+        
+        # 构建代理URL
+        if username and password:
+            proxy_url = f"{proxy_type}://{username}:{password}@{host}:{port}"
+        else:
+            proxy_url = f"{proxy_type}://{host}:{port}"
+        
+        # 写入/etc/environment
+        env_config = f"""
+# Proxy Configuration
+export HTTP_PROXY="{proxy_url}"
+export HTTPS_PROXY="{proxy_url}"
+export http_proxy="{proxy_url}"
+export https_proxy="{proxy_url}"
+export ALL_PROXY="{proxy_url}"
+export all_proxy="{proxy_url}"
+"""
+        
+        if no_proxy:
+            env_config += f"""
+export NO_PROXY="{no_proxy}"
+export no_proxy="{no_proxy}"
+"""
+        
+        # 写入到/etc/environment（需要root权限）
+        try:
+            with open('/etc/environment', 'a') as f:
+                f.write(env_config)
+        except PermissionError:
+            # 如果没有权限，写入到用户目录
+            home_dir = os.path.expanduser('~')
+            with open(os.path.join(home_dir, '.proxy_env'), 'w') as f:
+                f.write(env_config)
+            
+            # 添加到.bashrc
+            bashrc_path = os.path.join(home_dir, '.bashrc')
+            if os.path.exists(bashrc_path):
+                with open(bashrc_path, 'a') as f:
+                    f.write(f"\n# Load proxy configuration\nsource ~/.proxy_env\n")
+        
+        logger.info("已写入全局代理配置")
+        
+    except Exception as e:
+        logger.warning(f"写入全局代理配置失败: {str(e)}")
+
+def _clear_all_proxy_config():
+    """清除所有代理配置"""
+    try:
+        # 1. 清除环境变量
+        proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 
+                     'ALL_PROXY', 'all_proxy', 'NO_PROXY', 'no_proxy', 'FTP_PROXY', 'ftp_proxy']
+        for var in proxy_vars:
+            if var in os.environ:
+                del os.environ[var]
+        
+        # 2. 清除系统代理设置（GNOME）
+        if os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'):
+            try:
+                subprocess.run(['gsettings', 'set', 'org.gnome.system.proxy', 'mode', 'none'], 
+                             check=False, stderr=subprocess.DEVNULL)
+                subprocess.run(['gsettings', 'reset', 'org.gnome.system.proxy.http', 'host'], 
+                             check=False, stderr=subprocess.DEVNULL)
+                subprocess.run(['gsettings', 'reset', 'org.gnome.system.proxy.http', 'port'], 
+                             check=False, stderr=subprocess.DEVNULL)
+                subprocess.run(['gsettings', 'reset', 'org.gnome.system.proxy.socks', 'host'], 
+                             check=False, stderr=subprocess.DEVNULL)
+                subprocess.run(['gsettings', 'reset', 'org.gnome.system.proxy.socks', 'port'], 
+                             check=False, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+        
+        # 3. 清除APT代理
+        try:
+            if os.path.exists('/etc/apt/apt.conf.d/95proxy'):
+                os.remove('/etc/apt/apt.conf.d/95proxy')
+        except Exception:
+            pass
+        
+        # 4. 清除Git代理
+        try:
+            subprocess.run(['git', 'config', '--global', '--unset', 'http.proxy'], 
+                         check=False, stderr=subprocess.DEVNULL)
+            subprocess.run(['git', 'config', '--global', '--unset', 'https.proxy'], 
+                         check=False, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+        
+        # 5. 清除透明代理和iptables规则
+        try:
+            # 停止redsocks服务
+            subprocess.run(['pkill', '-f', 'redsocks'], check=False, stderr=subprocess.DEVNULL)
+            
+            # 清除iptables规则
+            subprocess.run(['iptables', '-t', 'nat', '-F', 'REDSOCKS'], 
+                         check=False, stderr=subprocess.DEVNULL)
+            subprocess.run(['iptables', '-t', 'nat', '-D', 'OUTPUT', '-p', 'tcp', '-j', 'REDSOCKS'], 
+                         check=False, stderr=subprocess.DEVNULL)
+            subprocess.run(['iptables', '-t', 'nat', '-X', 'REDSOCKS'], 
+                         check=False, stderr=subprocess.DEVNULL)
+            
+            # 删除redsocks配置文件
+            if os.path.exists('/tmp/redsocks.conf'):
+                os.remove('/tmp/redsocks.conf')
+        except Exception:
+            pass
+        
+        # 6. 清除环境配置文件
+        try:
+            home_dir = os.path.expanduser('~')
+            proxy_env_file = os.path.join(home_dir, '.proxy_env')
+            if os.path.exists(proxy_env_file):
+                os.remove(proxy_env_file)
+            
+            # 清除/etc/environment中的代理配置
+            if os.path.exists('/etc/environment'):
+                with open('/etc/environment', 'r') as f:
+                    lines = f.readlines()
+                
+                # 过滤掉代理相关的行
+                filtered_lines = []
+                for line in lines:
+                    if not any(proxy_var in line.upper() for proxy_var in 
+                             ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'FTP_PROXY']):
+                        filtered_lines.append(line)
+                
+                with open('/etc/environment', 'w') as f:
+                    f.writelines(filtered_lines)
+        except Exception:
+            pass
+        
+        # 7. 清除shell配置文件中的代理设置
+        try:
+            home_dir = os.path.expanduser('~')
+            shell_files = ['.bashrc', '.zshrc', '.profile', '.bash_profile']
+            
+            for shell_file in shell_files:
+                file_path = os.path.join(home_dir, shell_file)
+                if os.path.exists(file_path):
+                    with open(file_path, 'r') as f:
+                        content = f.read()
+                    
+                    # 移除代理相关的行
+                    lines = content.split('\n')
+                    filtered_lines = []
+                    skip_next = False
+                    
+                    for line in lines:
+                        if skip_next and line.strip() == '':
+                            skip_next = False
+                            continue
+                        
+                        if ('proxy' in line.lower() and ('export' in line or 'source' in line)) or \
+                           any(proxy_var in line.upper() for proxy_var in 
+                               ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'FTP_PROXY']) or \
+                           '.proxy_env' in line:
+                            skip_next = True
+                            continue
+                        
+                        filtered_lines.append(line)
+                        skip_next = False
+                    
+                    with open(file_path, 'w') as f:
+                        f.write('\n'.join(filtered_lines))
+        except Exception:
+            pass
+        
+        # 8. 重新加载shell环境（尝试）
+        try:
+            subprocess.run(['bash', '-c', 'source ~/.bashrc'], check=False, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+        
+        # 9. 清除Docker代理配置（如果存在）
+        try:
+            docker_config_dir = os.path.expanduser('~/.docker')
+            docker_config_file = os.path.join(docker_config_dir, 'config.json')
+            if os.path.exists(docker_config_file):
+                import json
+                with open(docker_config_file, 'r') as f:
+                    config = json.load(f)
+                
+                # 移除代理配置
+                if 'proxies' in config:
+                    del config['proxies']
+                
+                with open(docker_config_file, 'w') as f:
+                    json.dump(config, f, indent=2)
+        except Exception:
+            pass
+        
+        logger.info("已清除所有代理配置，包括环境变量、系统设置、配置文件等")
+        
+    except Exception as e:
+        logger.error(f"清除代理配置时出错: {str(e)}")
+
 # 在每个请求前检查认证
+# 初始化代理配置（用于Gunicorn启动）
+def init_proxy_config():
+    """初始化代理配置"""
+    try:
+        from config import load_config
+        config = load_config()
+        proxy_config = config.get('proxy')
+        if proxy_config:
+            apply_proxy_config(proxy_config)
+            logger.info("已加载代理配置")
+    except Exception as e:
+        logger.error(f"加载代理配置失败: {str(e)}")
+
+# 在Gunicorn启动时初始化代理配置
+init_proxy_config()
+
 @app.before_request
 def check_auth():
     # 确保自启动功能已初始化（用于Gunicorn启动）
@@ -5216,6 +5651,151 @@ def get_sponsor_key():
         logger.error(f"获取赞助者凭证时出错: {str(e)}")
         return jsonify({'status': 'error', 'message': f'获取赞助者凭证失败: {str(e)}'}), 500
 
+@app.route('/api/settings/proxy', methods=['POST'])
+@auth_required
+def save_proxy_config():
+    """保存代理配置"""
+    try:
+        data = request.json
+        
+        # 验证必要字段
+        if data.get('enabled', False):
+            if not data.get('host'):
+                return jsonify({'status': 'error', 'message': '代理服务器地址不能为空'}), 400
+            if not data.get('port'):
+                return jsonify({'status': 'error', 'message': '端口号不能为空'}), 400
+        
+        # 加载现有配置
+        from config import load_config, save_config
+        config = load_config()
+        
+        # 更新代理配置
+        config['proxy'] = {
+            'enabled': data.get('enabled', False),
+            'type': data.get('type', 'http'),
+            'host': data.get('host', ''),
+            'port': data.get('port', 8080),
+            'username': data.get('username', ''),
+            'password': data.get('password', ''),
+            'no_proxy': data.get('no_proxy', '')
+        }
+        
+        # 保存配置
+        if save_config(config):
+            # 应用代理配置到环境变量
+            apply_proxy_config(config['proxy'])
+            return jsonify({'status': 'success', 'message': '代理配置保存成功'})
+        else:
+            return jsonify({'status': 'error', 'message': '保存代理配置失败'}), 500
+            
+    except Exception as e:
+        logger.error(f"保存代理配置时出错: {str(e)}")
+        return jsonify({'status': 'error', 'message': f'保存代理配置失败: {str(e)}'}), 500
+
+@app.route('/api/settings/proxy', methods=['GET'])
+@auth_required
+def get_proxy_config():
+    """获取代理配置"""
+    try:
+        from config import load_config
+        config = load_config()
+        
+        # 获取代理配置，如果不存在则返回默认配置
+        proxy_config = config.get('proxy', {
+            'enabled': False,
+            'type': 'http',
+            'host': '',
+            'port': 8080,
+            'username': '',
+            'password': '',
+            'no_proxy': ''
+        })
+        
+        return jsonify({
+            'status': 'success',
+            'config': proxy_config
+        })
+        
+    except Exception as e:
+        logger.error(f"获取代理配置时出错: {str(e)}")
+        return jsonify({'status': 'error', 'message': f'获取代理配置失败: {str(e)}'}), 500
+
+@app.route('/api/settings/test-network', methods=['POST'])
+@auth_required
+def test_network_connectivity():
+    """测试网络连通性（谷歌连接测试）"""
+    try:
+        import time
+        import requests
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+        
+        # 获取超时设置
+        data = request.get_json() or {}
+        timeout = data.get('timeout', 10)
+        
+        # 创建会话并配置重试策略
+        session = requests.Session()
+        retry_strategy = Retry(
+            total=1,
+            backoff_factor=0.1,
+            status_forcelist=[429, 500, 502, 503, 504],
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        
+        # 测试目标列表（按优先级排序）
+        test_targets = [
+            {'url': 'https://www.google.com', 'name': 'Google'},
+            {'url': 'https://www.googleapis.com', 'name': 'Google APIs'},
+            {'url': 'https://dns.google', 'name': 'Google DNS'},
+        ]
+        
+        start_time = time.time()
+        
+        for target in test_targets:
+            try:
+                response = session.get(
+                    target['url'],
+                    timeout=timeout/1000,  # 转换为秒
+                    allow_redirects=True,
+                    headers={
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    }
+                )
+                
+                end_time = time.time()
+                latency_ms = int((end_time - start_time) * 1000)
+                
+                if response.status_code == 200:
+                    return jsonify({
+                        'status': 'success',
+                        'message': f'成功连接到 {target["name"]}',
+                        'latency': latency_ms,
+                        'target': target['name'],
+                        'url': target['url']
+                    })
+                    
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"连接 {target['name']} 失败: {str(e)}")
+                continue
+        
+        # 所有目标都失败
+        return jsonify({
+            'status': 'error',
+            'message': '无法连接到任何谷歌服务，请检查网络连接或代理设置',
+            'latency': None
+        }), 400
+        
+    except Exception as e:
+        logger.error(f"网络连通性测试时出错: {str(e)}")
+        return jsonify({
+            'status': 'error', 
+            'message': f'网络测试失败: {str(e)}',
+            'latency': None
+        }), 500
+
 @app.route('/api/version/check', methods=['GET'])
 @auth_required
 def check_version_update():
@@ -7056,6 +7636,17 @@ if __name__ == '__main__':
     # 加载备份配置
     load_backup_config()
     start_backup_scheduler()
+    
+    # 加载代理配置
+    try:
+        from config import load_config
+        config = load_config()
+        proxy_config = config.get('proxy')
+        if proxy_config:
+            apply_proxy_config(proxy_config)
+            logger.info("已加载代理配置")
+    except Exception as e:
+        logger.error(f"加载代理配置失败: {str(e)}")
     
     # 启动自启动功能
     auto_start_servers()
