@@ -84,6 +84,9 @@ MEFRP_BINARY = os.path.join(MEFRP_DIR, "frpc")
 # Sakura内网穿透
 SAKURA_DIR = os.path.join(FRP_DIR, "Sakura")
 SAKURA_BINARY = os.path.join(SAKURA_DIR, "frpc")
+# NPC内网穿透
+NPC_DIR = os.path.join(FRP_DIR, "npc")
+NPC_BINARY = os.path.join(NPC_DIR, "frpc")
 
 # 确保FRP相关目录存在
 os.makedirs(FRP_DIR, exist_ok=True)
@@ -93,6 +96,7 @@ os.makedirs(CUSTOM_FRP_DIR, exist_ok=True)
 os.makedirs(os.path.join(FRP_DIR, "logs"), exist_ok=True)
 os.makedirs(MEFRP_DIR, exist_ok=True)
 os.makedirs(SAKURA_DIR, exist_ok=True)
+os.makedirs(NPC_DIR, exist_ok=True)
 
 # FRP进程字典
 running_frp_processes = {}  # id: {'process': process, 'log_file': log_file_path}
@@ -4047,6 +4051,9 @@ def start_frp():
         elif target_config['type'] == 'sakura':
             frp_binary = SAKURA_BINARY
             frp_dir = SAKURA_DIR
+        elif target_config['type'] == 'npc':
+            frp_binary = NPC_BINARY
+            frp_dir = NPC_DIR
         
         # 确保FRP可执行
         if not os.path.exists(frp_binary):
@@ -5790,6 +5797,9 @@ def restart_frp(frp_id):
         elif target_config['type'] == 'sakura':
             frp_binary = SAKURA_BINARY
             frp_dir = SAKURA_DIR
+        elif target_config['type'] == 'npc':
+            frp_binary = NPC_BINARY
+            frp_dir = NPC_DIR
         
         # 确保FRP可执行
         if not os.path.exists(frp_binary):
