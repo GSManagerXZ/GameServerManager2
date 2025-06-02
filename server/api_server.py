@@ -4947,9 +4947,217 @@ def get_network_info():
             'public_ip': public_ip,
             'io_stats': io_stats
         })
+        
     except Exception as e:
         logger.error(f"获取网络信息失败: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/system_processes', methods=['GET'])
+@auth_required
+def get_system_processes():
+    """获取当前运行的所有进程信息"""
+    try:
+        processes = []
+        for proc in psutil.process_iter(['pid', 'name', 'username', 'cpu_percent', 'memory_percent', 'create_time', 'cmdline']):
+            try:
+                proc_info = proc.info
+                # 过滤掉一些系统进程和权限不足的进程
+                if proc_info['name'] and proc_info['pid'] > 1:
+                    # 获取命令行参数，限制长度
+                    cmdline = ' '.join(proc_info['cmdline'] or [])[:100]
+                    if len(cmdline) > 100:
+                        cmdline += '...'
+                    
+                    processes.append({
+                        'pid': proc_info['pid'],
+                        'name': proc_info['name'],
+                        'username': proc_info['username'] or 'unknown',
+                        'cpu_percent': round(proc_info['cpu_percent'] or 0, 2),
+                        'memory_percent': round(proc_info['memory_percent'] or 0, 2),
+                        'create_time': proc_info['create_time'],
+                        'cmdline': cmdline
+                    })
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+        
+        # 按CPU使用率排序
+        processes.sort(key=lambda x: x['cpu_percent'], reverse=True)
+        
+        return jsonify({
+            'status': 'success',
+            'processes': processes
+        })
+        
+    except Exception as e:
+        logger.error(f"获取进程信息失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/system_ports', methods=['GET'])
+@auth_required
+def get_system_ports():
+    """获取当前活跃的端口和对应的进程信息"""
+    try:
+        ports = []
+        port_set = set()  # 用于去重
+        
+        # 获取所有网络连接（包括IPv4和IPv6）
+        try:
+            connections = psutil.net_connections(kind='inet')
+        except psutil.AccessDenied:
+            # 如果权限不足，尝试只获取当前进程的连接
+            connections = psutil.net_connections(kind='inet', perproc=False)
+        
+        for conn in connections:
+            try:
+                port_info = None
+                
+                # 处理监听端口（服务器端口）
+                if conn.status == psutil.CONN_LISTEN and conn.laddr:
+                    port_key = (conn.laddr.port, conn.laddr.ip, 'LISTEN')
+                    if port_key not in port_set:
+                        port_set.add(port_key)
+                        port_info = {
+                            'port': conn.laddr.port,
+                            'address': conn.laddr.ip,
+                            'family': 'IPv4' if conn.family == socket.AF_INET else 'IPv6',
+                            'type': 'TCP' if conn.type == socket.SOCK_STREAM else 'UDP',
+                            'status': 'LISTEN',
+                            'pid': conn.pid,
+                            'process_name': None,
+                            'process_cmdline': None
+                        }
+                
+                # 处理已建立的连接（显示本地端口）
+                elif conn.status == psutil.CONN_ESTABLISHED and conn.laddr:
+                    port_key = (conn.laddr.port, conn.laddr.ip, 'ESTABLISHED')
+                    if port_key not in port_set:
+                        port_set.add(port_key)
+                        remote_info = f"{conn.raddr.ip}:{conn.raddr.port}" if conn.raddr else "Unknown"
+                        port_info = {
+                            'port': conn.laddr.port,
+                            'address': conn.laddr.ip,
+                            'family': 'IPv4' if conn.family == socket.AF_INET else 'IPv6',
+                            'type': 'TCP' if conn.type == socket.SOCK_STREAM else 'UDP',
+                            'status': f'ESTABLISHED -> {remote_info}',
+                            'pid': conn.pid,
+                            'process_name': None,
+                            'process_cmdline': None
+                        }
+                
+                # 处理UDP连接（通常没有状态）
+                elif conn.type == socket.SOCK_DGRAM and conn.laddr:
+                    port_key = (conn.laddr.port, conn.laddr.ip, 'UDP')
+                    if port_key not in port_set:
+                        port_set.add(port_key)
+                        port_info = {
+                            'port': conn.laddr.port,
+                            'address': conn.laddr.ip,
+                            'family': 'IPv4' if conn.family == socket.AF_INET else 'IPv6',
+                            'type': 'UDP',
+                            'status': 'ACTIVE',
+                            'pid': conn.pid,
+                            'process_name': None,
+                            'process_cmdline': None
+                        }
+                
+                # 获取进程信息
+                if port_info and conn.pid:
+                    try:
+                        proc = psutil.Process(conn.pid)
+                        port_info['process_name'] = proc.name()
+                        cmdline = ' '.join(proc.cmdline()[:3])  # 只取前3个参数
+                        if len(cmdline) > 80:
+                            cmdline = cmdline[:80] + '...'
+                        port_info['process_cmdline'] = cmdline
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        port_info['process_name'] = 'Unknown'
+                        port_info['process_cmdline'] = 'Access Denied'
+                
+                if port_info:
+                    ports.append(port_info)
+                    
+            except Exception:
+                continue
+        
+        # 按端口号排序
+        ports.sort(key=lambda x: x['port'])
+        
+        return jsonify({
+            'status': 'success',
+            'ports': ports
+        })
+        
+    except Exception as e:
+        logger.error(f"获取端口信息失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/kill_process', methods=['POST'])
+@auth_required
+def kill_process():
+    """结束指定的进程"""
+    try:
+        data = request.get_json()
+        if not data or 'pid' not in data:
+            return jsonify({
+                'status': 'error',
+                'message': '缺少进程ID参数'
+            }), 400
+        
+        pid = data['pid']
+        force = data.get('force', False)
+        
+        try:
+            proc = psutil.Process(pid)
+            proc_name = proc.name()
+            
+            # 安全检查：不允许杀死重要的系统进程
+            critical_processes = ['systemd', 'kernel', 'init', 'kthreadd', 'ssh', 'sshd']
+            if proc_name.lower() in critical_processes:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'不允许结束关键系统进程: {proc_name}'
+                }), 403
+            
+            if force:
+                proc.kill()  # SIGKILL
+                action = '强制结束'
+            else:
+                proc.terminate()  # SIGTERM
+                action = '正常结束'
+            
+            logger.info(f"{action}进程: PID={pid}, Name={proc_name}")
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'已{action}进程 {proc_name} (PID: {pid})'
+            })
+            
+        except psutil.NoSuchProcess:
+            return jsonify({
+                'status': 'error',
+                'message': '进程不存在或已结束'
+            }), 404
+        except psutil.AccessDenied:
+            return jsonify({
+                'status': 'error',
+                'message': '权限不足，无法结束该进程'
+            }), 403
+            
+    except Exception as e:
+        logger.error(f"结束进程失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
 # 添加公网IP缓存相关变量
 cached_public_ip = None

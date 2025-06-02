@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Progress, Statistic, Table, Typography, Button, Space, Row, Col, Divider, Tag, Dropdown, Menu, Alert } from 'antd';
-import { ReloadOutlined, HddOutlined, RocketOutlined, AppstoreOutlined, DownOutlined, GlobalOutlined, WarningOutlined } from '@ant-design/icons';
+import { Card, Progress, Statistic, Table, Typography, Button, Space, Row, Col, Divider, Tag, Dropdown, Menu, Alert, Modal, message } from 'antd';
+import { ReloadOutlined, HddOutlined, RocketOutlined, AppstoreOutlined, DownOutlined, GlobalOutlined, WarningOutlined, DesktopOutlined, ApiOutlined, ExclamationCircleOutlined, StopOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { useIsMobile } from '../hooks/useIsMobile'; // 导入移动端检测钩子
 
@@ -61,6 +61,27 @@ interface GameInfo {
   external?: boolean;
 }
 
+interface ProcessInfo {
+  pid: number;
+  name: string;
+  username: string;
+  cpu_percent: number;
+  memory_percent: number;
+  create_time: number;
+  cmdline: string;
+}
+
+interface PortInfo {
+  port: number;
+  address: string;
+  family: string;
+  type: string;
+  status: string;
+  pid: number;
+  process_name: string;
+  process_cmdline: string;
+}
+
 interface ContainerInfoProps {
   onInstallGame?: (gameId: string) => void;
   onStartServer?: (gameId: string) => void;
@@ -79,6 +100,10 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
   const [installedGames, setInstalledGames] = useState<GameInfo[]>([]);
   const [runningGames, setRunningGames] = useState<GameInfo[]>([]);
   const [networkStats, setNetworkStats] = useState<{sent: number[], recv: number[]}>({sent: [], recv: []});
+  const [processes, setProcesses] = useState<ProcessInfo[]>([]);
+  const [ports, setPorts] = useState<PortInfo[]>([]);
+  const [processLoading, setProcessLoading] = useState<boolean>(false);
+  const [portLoading, setPortLoading] = useState<boolean>(false);
   const isMobile = useIsMobile(); // 检测是否为移动端
 
   const fetchContainerInfo = async () => {
@@ -175,6 +200,98 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
     }
   };
 
+  // 获取进程信息
+  const fetchProcesses = async () => {
+    setProcessLoading(true);
+    try {
+      const response = await axios.get('/api/system_processes');
+      if (response.data.status === 'success') {
+        setProcesses(response.data.processes || []);
+      }
+    } catch (error) {
+      console.error('获取进程信息失败:', error);
+      message.error('获取进程信息失败');
+    } finally {
+      setProcessLoading(false);
+    }
+  };
+
+  // 获取端口信息
+  const fetchPorts = async () => {
+    setPortLoading(true);
+    try {
+      const response = await axios.get('/api/system_ports');
+      if (response.data.status === 'success') {
+        setPorts(response.data.ports || []);
+      }
+    } catch (error) {
+      console.error('获取端口信息失败:', error);
+      message.error('获取端口信息失败');
+    } finally {
+      setPortLoading(false);
+    }
+  };
+
+  // 结束进程
+  const killProcess = async (pid: number, processName: string, force: boolean = false) => {
+    try {
+      const response = await axios.post('/api/kill_process', {
+        pid: pid,
+        force: force
+      });
+      if (response.data.status === 'success') {
+        message.success(response.data.message);
+        fetchProcesses(); // 刷新进程列表
+      } else {
+        message.error(response.data.message);
+      }
+    } catch (error: any) {
+      console.error('结束进程失败:', error);
+      message.error(error.response?.data?.message || '结束进程失败');
+    }
+  };
+
+  // 显示结束进程确认对话框
+  const showKillProcessConfirm = (pid: number, processName: string) => {
+    Modal.confirm({
+      title: '确认结束进程',
+      icon: <ExclamationCircleOutlined />,
+      content: (
+        <div>
+          <p>您确定要结束以下进程吗？</p>
+          <p><strong>进程名:</strong> {processName}</p>
+          <p><strong>PID:</strong> {pid}</p>
+          <p style={{ color: '#ff4d4f', marginTop: 16 }}>
+            <WarningOutlined /> 警告：结束进程可能会导致数据丢失或系统不稳定！
+          </p>
+        </div>
+      ),
+      okText: '正常结束',
+      cancelText: '取消',
+      okType: 'danger',
+      onOk() {
+        killProcess(pid, processName, false);
+      },
+      footer: [
+        <Button key="cancel" onClick={() => Modal.destroyAll()}>
+          取消
+        </Button>,
+        <Button key="terminate" type="primary" danger onClick={() => {
+          Modal.destroyAll();
+          killProcess(pid, processName, false);
+        }}>
+          正常结束
+        </Button>,
+        <Button key="kill" type="primary" danger onClick={() => {
+          Modal.destroyAll();
+          killProcess(pid, processName, true);
+        }}>
+          强制结束
+        </Button>
+      ]
+    });
+  };
+
   useEffect(() => {
     fetchContainerInfo();
     // 设置定时刷新（每30秒）但如果有运行中的服务器，增加间隔时间避免频繁请求
@@ -226,6 +343,227 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
     } else {
       return `${(bytesPerSecond / (1024 * 1024 * 1024)).toFixed(1)} GB/s`;
     }
+  };
+
+  // 格式化时间戳
+  const formatTimestamp = (timestamp: number): string => {
+    return new Date(timestamp * 1000).toLocaleString('zh-CN');
+  };
+
+  // 进程表格列定义
+  const processColumns = [
+    {
+      title: 'PID',
+      dataIndex: 'pid',
+      key: 'pid',
+      width: 80,
+      sorter: (a: ProcessInfo, b: ProcessInfo) => a.pid - b.pid,
+    },
+    {
+      title: '进程名',
+      dataIndex: 'name',
+      key: 'name',
+      width: 120,
+      sorter: (a: ProcessInfo, b: ProcessInfo) => a.name.localeCompare(b.name),
+    },
+    {
+      title: '用户',
+      dataIndex: 'username',
+      key: 'username',
+      width: 100,
+      sorter: (a: ProcessInfo, b: ProcessInfo) => a.username.localeCompare(b.username),
+    },
+    {
+      title: 'CPU%',
+      dataIndex: 'cpu_percent',
+      key: 'cpu_percent',
+      width: 80,
+      sorter: (a: ProcessInfo, b: ProcessInfo) => a.cpu_percent - b.cpu_percent,
+      render: (cpu: number) => `${cpu.toFixed(1)}%`,
+    },
+    {
+      title: '内存%',
+      dataIndex: 'memory_percent',
+      key: 'memory_percent',
+      width: 80,
+      sorter: (a: ProcessInfo, b: ProcessInfo) => a.memory_percent - b.memory_percent,
+      render: (memory: number) => `${memory.toFixed(1)}%`,
+    },
+    {
+      title: '命令行',
+      dataIndex: 'cmdline',
+      key: 'cmdline',
+      ellipsis: true,
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 100,
+      render: (_, record: ProcessInfo) => (
+        <Button
+          size="small"
+          danger
+          icon={<StopOutlined />}
+          onClick={() => showKillProcessConfirm(record.pid, record.name)}
+        >
+          结束
+        </Button>
+      ),
+    },
+  ];
+
+  // 端口表格列定义
+  const portColumns = [
+    {
+      title: '端口',
+      dataIndex: 'port',
+      key: 'port',
+      width: 80,
+      sorter: (a: PortInfo, b: PortInfo) => a.port - b.port,
+    },
+    {
+      title: '地址',
+      dataIndex: 'address',
+      key: 'address',
+      width: 120,
+    },
+    {
+      title: '协议',
+      dataIndex: 'type',
+      key: 'type',
+      width: 60,
+      render: (type: string) => <Tag color={type === 'TCP' ? 'blue' : 'green'}>{type}</Tag>,
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 200,
+      ellipsis: true,
+      render: (status: string) => {
+        let color = 'default';
+        let displayText = status;
+        
+        if (status === 'LISTEN') {
+          color = 'green';
+        } else if (status === 'ACTIVE') {
+          color = 'blue';
+        } else if (status.startsWith('ESTABLISHED')) {
+          color = 'orange';
+          // 简化ESTABLISHED显示，只显示远程IP
+          const match = status.match(/ESTABLISHED -> (.+)/);
+          if (match) {
+            const remoteAddr = match[1];
+            displayText = `ESTABLISHED ${remoteAddr}`;
+          }
+        }
+        
+        return (
+          <Tag color={color} title={status}>
+            {displayText}
+          </Tag>
+        );
+      },
+    },
+    {
+      title: 'PID',
+      dataIndex: 'pid',
+      key: 'pid',
+      width: 80,
+    },
+    {
+      title: '进程名',
+      dataIndex: 'process_name',
+      key: 'process_name',
+      width: 120,
+    },
+    {
+      title: '命令行',
+      dataIndex: 'process_cmdline',
+      key: 'process_cmdline',
+      ellipsis: true,
+    },
+  ];
+
+  // 移动端进程表格列
+  const getMobileProcessColumns = () => {
+    return [
+      {
+        title: '进程信息',
+        key: 'info',
+        render: (_, record: ProcessInfo) => (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <span style={{ fontWeight: 'bold' }}>{record.name}</span>
+              <Button
+                size="small"
+                danger
+                icon={<StopOutlined />}
+                onClick={() => showKillProcessConfirm(record.pid, record.name)}
+              >
+                结束
+              </Button>
+            </div>
+            <div style={{ fontSize: '12px', color: '#888' }}>
+              <div>PID: {record.pid} | 用户: {record.username}</div>
+              <div>CPU: {record.cpu_percent.toFixed(1)}% | 内存: {record.memory_percent.toFixed(1)}%</div>
+              <div style={{ marginTop: 4, wordBreak: 'break-all' }}>
+                命令: {record.cmdline}
+              </div>
+            </div>
+          </div>
+        ),
+      },
+    ];
+  };
+
+  // 移动端端口表格列
+  const getMobilePortColumns = () => {
+    return [
+      {
+        title: '端口信息',
+        key: 'info',
+        render: (_, record: PortInfo) => {
+           let statusColor = 'default';
+           let statusText = record.status;
+           
+           if (record.status === 'LISTEN') {
+             statusColor = 'green';
+           } else if (record.status === 'ACTIVE') {
+             statusColor = 'blue';
+           } else if (record.status.startsWith('ESTABLISHED')) {
+             statusColor = 'orange';
+             // 简化ESTABLISHED显示
+             const match = record.status.match(/ESTABLISHED -> (.+)/);
+             if (match) {
+               const remoteAddr = match[1];
+               statusText = `连接至 ${remoteAddr}`;
+             }
+           }
+           
+           return (
+             <div>
+               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                 <span style={{ fontWeight: 'bold' }}>端口 {record.port}</span>
+                 <div>
+                   <Tag color={record.type === 'TCP' ? 'blue' : 'green'}>{record.type}</Tag>
+                   <Tag color={statusColor} style={{ marginLeft: 4 }} title={record.status}>
+                     {statusText}
+                   </Tag>
+                 </div>
+               </div>
+               <div style={{ fontSize: '12px', color: '#888' }}>
+                 <div>地址: {record.address}</div>
+                 <div>PID: {record.pid} | 进程: {record.process_name}</div>
+                 <div style={{ marginTop: 4, wordBreak: 'break-all' }}>
+                   命令: {record.process_cmdline}
+                 </div>
+               </div>
+             </div>
+           );
+         },
+      },
+    ];
   };
 
   // 渲染简单的网络流量图表
@@ -756,8 +1094,80 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
           </Card>
         </Col>
       </Row>
+
+      <Divider />
+
+      {/* 进程管理和端口监控 */}
+      <Row gutter={isMobile ? 8 : 16} className="system-monitoring">
+        <Col xs={24} sm={24} md={12}>
+          <Card 
+            title={<><DesktopOutlined /> 系统进程 ({processes.length})</>}
+            extra={
+              <Button 
+                size="small" 
+                icon={<ReloadOutlined />} 
+                onClick={fetchProcesses}
+                loading={processLoading}
+              >
+                刷新
+              </Button>
+            }
+            loading={processLoading}
+            style={{marginBottom: isMobile ? 8 : 0, borderRadius: '8px'}}
+            size={isMobile ? "small" : "default"}
+          >
+            <Table 
+              dataSource={processes} 
+              columns={isMobile ? getMobileProcessColumns() : processColumns} 
+              rowKey="pid"
+              pagination={{
+                pageSize: isMobile ? 5 : 10,
+                showSizeChanger: false,
+                showQuickJumper: false,
+                size: 'small'
+              }}
+              size={isMobile ? "small" : "default"}
+              locale={{ emptyText: '暂无进程信息' }}
+              scroll={isMobile ? { x: '100%' } : { y: 300 }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={24} md={12}>
+          <Card 
+            title={<><ApiOutlined /> 活跃端口 ({ports.length})</>}
+            extra={
+              <Button 
+                size="small" 
+                icon={<ReloadOutlined />} 
+                onClick={fetchPorts}
+                loading={portLoading}
+              >
+                刷新
+              </Button>
+            }
+            loading={portLoading}
+            style={{marginBottom: isMobile ? 8 : 0, borderRadius: '8px'}}
+            size={isMobile ? "small" : "default"}
+          >
+            <Table 
+              dataSource={ports} 
+              columns={isMobile ? getMobilePortColumns() : portColumns} 
+              rowKey={(record) => `${record.port}-${record.address}`}
+              pagination={{
+                pageSize: isMobile ? 5 : 10,
+                showSizeChanger: false,
+                showQuickJumper: false,
+                size: 'small'
+              }}
+              size={isMobile ? "small" : "default"}
+              locale={{ emptyText: '暂无端口信息' }}
+              scroll={isMobile ? { x: '100%' } : { y: 300 }}
+            />
+          </Card>
+        </Col>
+      </Row>
     </div>
   );
 };
 
-export default ContainerInfo; 
+export default ContainerInfo;
