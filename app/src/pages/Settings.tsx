@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Typography, Card, Tabs, Form, Input, Button, message, Alert, Divider } from 'antd';
+import { Typography, Card, Tabs, Form, Input, Button, message, Alert, Divider, Spin } from 'antd';
 import axios from 'axios';
-import { HeartOutlined, InfoCircleOutlined } from '@ant-design/icons';
+import { HeartOutlined, InfoCircleOutlined, FileTextOutlined, DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
 
 const { Title, Paragraph } = Typography;
 const { TabPane } = Tabs;
@@ -12,6 +12,11 @@ const Settings: React.FC = () => {
   const [sponsorKeyLoading, setSponsorKeyLoading] = useState(true);
   const [hasSponsorKey, setHasSponsorKey] = useState(false);
   const [maskedSponsorKey, setMaskedSponsorKey] = useState('');
+  
+  // 日志相关状态
+  const [logContent, setLogContent] = useState<string>('');
+  const [logLoading, setLogLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
 
   // 获取赞助者凭证信息
   useEffect(() => {
@@ -34,6 +39,59 @@ const Settings: React.FC = () => {
 
     fetchSponsorKey();
   }, []);
+
+  // 获取日志内容
+  const fetchLogContent = async () => {
+    try {
+      setLogLoading(true);
+      const response = await axios.get('/api/logs/api-server');
+      
+      if (response.data.status === 'success') {
+        setLogContent(response.data.content || '暂无日志内容');
+      } else {
+        message.error(`获取日志失败: ${response.data.message || '未知错误'}`);
+        setLogContent('获取日志失败');
+      }
+    } catch (error) {
+      console.error('获取日志失败:', error);
+      message.error('获取日志失败');
+      setLogContent('获取日志失败');
+    } finally {
+      setLogLoading(false);
+    }
+  };
+
+  // 导出日志
+  const handleExportLog = async () => {
+    try {
+      setExportLoading(true);
+      const response = await axios.get('/api/logs/api-server/export', {
+        responseType: 'blob'
+      });
+      
+      // 创建下载链接
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // 生成文件名（包含时间戳）
+      const now = new Date();
+      const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      link.download = `api_server_${timestamp}.log`;
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      message.success('日志导出成功');
+    } catch (error) {
+      console.error('导出日志失败:', error);
+      message.error('导出日志失败');
+    } finally {
+      setExportLoading(false);
+    }
+  };
 
   // 保存赞助者凭证
   const handleSponsorCredentialSubmit = async (values: { sponsorKey: string }) => {
@@ -66,6 +124,71 @@ const Settings: React.FC = () => {
       setLoading(false);
     }
   };
+
+  // 日志管理部分的JSX
+  const renderLogSection = () => (
+    <Card 
+      title={<><FileTextOutlined /> 系统日志</>}
+      bordered={false} 
+      className="settings-card"
+      extra={
+        <div>
+          <Button 
+            icon={<ReloadOutlined />} 
+            onClick={fetchLogContent}
+            loading={logLoading}
+            style={{ marginRight: 8 }}
+          >
+            刷新
+          </Button>
+          <Button 
+            type="primary"
+            icon={<DownloadOutlined />} 
+            onClick={handleExportLog}
+            loading={exportLoading}
+          >
+            导出日志
+          </Button>
+        </div>
+      }
+    >
+      <Paragraph>
+        查看和导出API服务器的运行日志，帮助诊断系统问题。
+      </Paragraph>
+      
+      <div style={{ 
+        border: '1px solid #d9d9d9', 
+        borderRadius: 6, 
+        padding: 12, 
+        backgroundColor: '#fafafa',
+        minHeight: 400,
+        maxHeight: 600,
+        overflow: 'auto',
+        fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
+        fontSize: 12,
+        lineHeight: 1.5
+      }}>
+        {logLoading ? (
+          <div style={{ textAlign: 'center', padding: 50 }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16 }}>正在加载日志...</div>
+          </div>
+        ) : (
+          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'left' }}>
+            {logContent}
+          </pre>
+        )}
+      </div>
+      
+      <Alert
+        message="日志文件路径"
+        description="/home/steam/server/api_server.log"
+        type="info"
+        showIcon
+        style={{ marginTop: 16 }}
+      />
+    </Card>
+  );
 
   // 赞助者凭证设置部分的JSX
   const renderSponsorCredentialSection = () => (
@@ -139,9 +262,14 @@ const Settings: React.FC = () => {
             {renderSponsorCredentialSection()}
           </div>
         </TabPane>
+        <TabPane tab="日志" key="logs">
+          <div style={{ padding: '20px 0' }}>
+            {renderLogSection()}
+          </div>
+        </TabPane>
       </Tabs>
     </Card>
   );
 };
 
-export default Settings; 
+export default Settings;

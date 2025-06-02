@@ -9,6 +9,10 @@ const { Title, Paragraph } = Typography;
 
 interface SystemInfo {
   cpu_usage: number;
+  cpu_per_core?: number[];
+  cpu_model?: string;
+  cpu_cores?: number;
+  cpu_logical_cores?: number;
   memory: {
     total: number;
     used: number;
@@ -129,30 +133,46 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
   });
   const [isDragMode, setIsDragMode] = useState<boolean>(false);
   const [settingsVisible, setSettingsVisible] = useState<boolean>(false);
+  const [cpuCoresExpanded, setCpuCoresExpanded] = useState<boolean>(false); // CPU核心展开状态
   const isMobile = useIsMobile(); // 检测是否为移动端
 
-  const fetchContainerInfo = async () => {
-    setLoading(true);
+  const fetchContainerInfo = async (includeNetworkInfo = false) => {
+    // 记录是否为首次加载
+    const isFirstLoad = !systemInfo;
+    
+    // 只在首次加载时显示loading状态，避免刷新时的白屏
+    if (isFirstLoad) {
+      setLoading(true);
+    }
+    
     try {
       // 添加超时处理
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 减少超时时间到5秒
       
       try {
-        const [containerInfoResp, installedGamesResp, networkInfoResp] = await Promise.all([
+        // 基础请求
+        const requests = [
           axios.get('/api/container_info', { 
             signal: controller.signal,
-            timeout: 10000 // 设置axios超时
+            timeout: 5000 // 减少axios超时时间
           }),
           axios.get('/api/installed_games', { 
             signal: controller.signal,
-            timeout: 10000 
-          }),
-          axios.get('/api/network_info', { 
-            signal: controller.signal,
-            timeout: 10000 
+            timeout: 5000 
           })
-        ]);
+        ];
+        
+        // 只在需要时添加网络信息请求
+        if (includeNetworkInfo) {
+          requests.push(axios.get('/api/network_info', { 
+            signal: controller.signal,
+            timeout: 5000 
+          }));
+        }
+        
+        const responses = await Promise.all(requests);
+        const [containerInfoResp, installedGamesResp, networkInfoResp] = responses;
         
         // 清除超时定时器
         clearTimeout(timeoutId);
@@ -160,8 +180,8 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
         if (containerInfoResp.data.status === 'success') {
           const sysInfo = containerInfoResp.data.system_info;
           
-          // 添加网络信息
-          if (networkInfoResp.data.status === 'success') {
+          // 添加网络信息（仅在有网络信息响应时处理）
+          if (networkInfoResp && networkInfoResp.data.status === 'success') {
             sysInfo.network = {
               interfaces: networkInfoResp.data.network_interfaces,
               public_ip: networkInfoResp.data.public_ip,
@@ -210,18 +230,20 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
         // 处理请求错误
         console.error("获取容器信息失败:", error);
         
-        // 如果是超时错误，显示适当的提示
+        // 如果是超时错误或网络错误，保持现有数据不变
         if (error.name === 'AbortError' || error.code === 'ECONNABORTED') {
-          console.warn("容器信息请求超时，使用缓存数据");
-          // 保持使用现有数据，不更新状态
+          console.warn("容器信息请求超时，保持现有数据");
         } else {
-          // 其他错误，可以考虑设置一些默认值
-          // 但不要完全重置状态，保留之前的数据
-          console.warn("容器信息请求失败，使用缓存数据");
+          console.warn("容器信息请求失败，保持现有数据");
         }
+        
+        // 不更新任何状态，保持现有数据显示
       }
     } finally {
-      setLoading(false);
+      // 只在首次加载时关闭loading状态
+      if (isFirstLoad) {
+        setLoading(false);
+      }
     }
   };
 
@@ -359,11 +381,14 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
   };
 
   useEffect(() => {
-    fetchContainerInfo();
-    // 设置定时刷新（每30秒）但如果有运行中的服务器，增加间隔时间避免频繁请求
-    const interval = setInterval(fetchContainerInfo, runningGames.length > 0 ? 60000 : 30000);
+    // 首次加载时获取包含网络信息的完整数据
+    fetchContainerInfo(true);
+    // 根据是否有正在运行的游戏动态设置刷新间隔
+    const refreshInterval = runningGames.length > 0 ? 10000 : 2000; // 有运行游戏时10秒，否则2秒
+    // 定时刷新时不获取网络信息，减少服务器压力
+    const interval = setInterval(() => fetchContainerInfo(false), refreshInterval);
     return () => clearInterval(interval);
-  }, [runningGames.length]);
+  }, [runningGames.length]); // 依赖runningGames的长度变化
 
   // 格式化时间显示
   const formatUptime = (seconds: number): string => {
@@ -636,18 +661,138 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
   const renderCpuCard = () => (
     <Card 
       title={<><HddOutlined /> CPU使用率</>} 
-      loading={loading} 
-      style={{marginBottom: isMobile ? 8 : 16, borderRadius: '8px', minHeight: isMobile ? 'auto' : '200px'}} 
+      style={{
+        marginBottom: isMobile ? 8 : 16, 
+        borderRadius: '8px', 
+        minHeight: isMobile ? 'auto' : (cpuCoresExpanded ? '400px' : '200px'),
+        transition: 'all 0.3s ease-in-out',
+        transform: 'translateZ(0)' // 启用硬件加速
+      }} 
       size={isMobile ? "small" : "default"}
+      extra={
+        systemInfo?.cpu_per_core && systemInfo.cpu_per_core.length > 0 && (
+          <Button 
+            type="text" 
+            size="small" 
+            onClick={() => setCpuCoresExpanded(!cpuCoresExpanded)}
+            style={{ color: '#1890ff' }}
+          >
+            {cpuCoresExpanded ? '收起核心详情' : '展开核心详情'}
+          </Button>
+        )
+      }
     >
-      <Progress 
-        type="dashboard" 
-        percent={Math.round(systemInfo?.cpu_usage || 0)} 
-        status={systemInfo?.cpu_usage && systemInfo.cpu_usage > 80 ? 'exception' : 'normal'} 
-        format={percent => `${Math.round(percent || 0)}%`}
-        width={isMobile ? 80 : 120}
-      />
-      <Statistic title="使用率" value={`${Math.round(systemInfo?.cpu_usage || 0)}%`} />
+      {!cpuCoresExpanded ? (
+        // 收起状态：与其他卡片保持一致的简洁布局
+        <>
+          <Progress 
+            type="dashboard" 
+            percent={Math.round(systemInfo?.cpu_usage || 0)} 
+            status={systemInfo?.cpu_usage && systemInfo.cpu_usage > 80 ? 'exception' : 'normal'} 
+            format={percent => `${Math.round(percent || 0)}%`}
+            width={isMobile ? 80 : 120}
+            strokeLinecap="round"
+            trailColor="#f0f0f0"
+            style={{
+              transition: 'all 0.3s ease-in-out'
+            }}
+          />
+          <Statistic 
+            title="使用率" 
+            value={`${Math.round(systemInfo?.cpu_usage || 0)}%`}
+            valueStyle={{
+              transition: 'all 0.3s ease-in-out',
+              color: systemInfo?.cpu_usage && systemInfo.cpu_usage > 80 ? '#ff4d4f' : '#1890ff'
+            }}
+          />
+        </>
+      ) : (
+        // 展开状态：显示详细信息
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* CPU型号信息 */}
+          <div>
+            <Title level={5} style={{ margin: 0, marginBottom: '8px' }}>处理器型号</Title>
+            <Paragraph style={{ margin: 0, fontSize: '14px', color: '#666' }}>
+              {systemInfo?.cpu_model || '未知'}
+            </Paragraph>
+            <div style={{ marginTop: '8px', fontSize: '12px', color: '#999' }}>
+              物理核心: {systemInfo?.cpu_cores || 0} | 逻辑核心: {systemInfo?.cpu_logical_cores || 0}
+            </div>
+          </div>
+          
+          {/* 总体CPU使用率 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <Progress 
+              type="dashboard" 
+              percent={Math.round(systemInfo?.cpu_usage || 0)} 
+              status={systemInfo?.cpu_usage && systemInfo.cpu_usage > 80 ? 'exception' : 'normal'} 
+              format={percent => `${Math.round(percent || 0)}%`}
+              width={isMobile ? 80 : 100}
+              strokeLinecap="round"
+              trailColor="#f0f0f0"
+              style={{
+                transition: 'all 0.3s ease-in-out'
+              }}
+            />
+            <div>
+              <div style={{ fontSize: '16px', fontWeight: 'bold' }}>总体使用率</div>
+              <div style={{ 
+                fontSize: '24px', 
+                color: systemInfo?.cpu_usage && systemInfo.cpu_usage > 80 ? '#ff4d4f' : '#1890ff',
+                transition: 'all 0.3s ease-in-out'
+              }}>
+                {Math.round(systemInfo?.cpu_usage || 0)}%
+              </div>
+            </div>
+          </div>
+          
+          {/* 每个核心的使用率 */}
+          {systemInfo?.cpu_per_core && systemInfo.cpu_per_core.length > 0 && (
+            <div>
+              <Title level={5} style={{ margin: 0, marginBottom: '12px' }}>各核心使用率</Title>
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', 
+                gap: '8px' 
+              }}>
+                {systemInfo.cpu_per_core.map((usage, index) => (
+                  <div key={index} style={{ 
+                    padding: '8px', 
+                    border: '1px solid #f0f0f0', 
+                    borderRadius: '4px',
+                    textAlign: 'center',
+                    backgroundColor: usage > 80 ? '#fff2f0' : usage > 60 ? '#fffbe6' : '#f6ffed',
+                    transition: 'all 0.3s ease-in-out'
+                  }}>
+                    <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>
+                      核心 {index + 1}
+                    </div>
+                    <div style={{ 
+                      fontSize: '14px', 
+                      fontWeight: 'bold',
+                      color: usage > 80 ? '#ff4d4f' : usage > 60 ? '#faad14' : '#52c41a',
+                      transition: 'all 0.3s ease-in-out'
+                    }}>
+                      {Math.round(usage)}%
+                    </div>
+                    <Progress 
+                      percent={Math.round(usage)} 
+                      showInfo={false} 
+                      size="small"
+                      strokeColor={usage > 80 ? '#ff4d4f' : usage > 60 ? '#faad14' : '#52c41a'}
+                      strokeLinecap="round"
+                      trailColor="#f0f0f0"
+                      style={{
+                        transition: 'all 0.3s ease-in-out'
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </Card>
   );
 
@@ -655,8 +800,13 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
   const renderMemoryCard = () => (
     <Card 
       title={<><HddOutlined /> 内存使用</>} 
-      loading={loading} 
-      style={{marginBottom: isMobile ? 8 : 16, borderRadius: '8px', minHeight: isMobile ? 'auto' : '200px'}} 
+      style={{
+        marginBottom: isMobile ? 8 : 16, 
+        borderRadius: '8px', 
+        minHeight: isMobile ? 'auto' : '200px',
+        transition: 'all 0.3s ease-in-out',
+        transform: 'translateZ(0)'
+      }} 
       size={isMobile ? "small" : "default"}
     >
       <Progress 
@@ -665,10 +815,19 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
         status={systemInfo?.memory.percent && systemInfo.memory.percent > 80 ? 'exception' : 'normal'} 
         format={percent => `${Math.round(percent || 0)}%`}
         width={isMobile ? 80 : 120}
+        strokeLinecap="round"
+        trailColor="#f0f0f0"
+        style={{
+          transition: 'all 0.3s ease-in-out'
+        }}
       />
       <Statistic 
         title="使用/总量" 
-        value={systemInfo ? formatGBPair(systemInfo.memory.used, systemInfo.memory.total) : '-'} 
+        value={systemInfo ? formatGBPair(systemInfo.memory.used, systemInfo.memory.total) : '-'}
+        valueStyle={{
+          transition: 'all 0.3s ease-in-out',
+          color: systemInfo?.memory.percent && systemInfo.memory.percent > 80 ? '#ff4d4f' : '#1890ff'
+        }}
       />
     </Card>
   );
@@ -677,8 +836,13 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
   const renderDiskCard = () => (
     <Card 
       title={<><HddOutlined /> 磁盘使用</>} 
-      loading={loading} 
-      style={{marginBottom: isMobile ? 8 : 16, borderRadius: '8px', minHeight: isMobile ? 'auto' : '200px'}} 
+      style={{
+        marginBottom: isMobile ? 8 : 16, 
+        borderRadius: '8px', 
+        minHeight: isMobile ? 'auto' : '200px',
+        transition: 'all 0.3s ease-in-out',
+        transform: 'translateZ(0)'
+      }} 
       size={isMobile ? "small" : "default"}
     >
       <Progress 
@@ -687,10 +851,19 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
         status={systemInfo?.disk.percent && systemInfo.disk.percent > 80 ? 'exception' : 'normal'} 
         format={percent => `${Math.round(percent || 0)}%`}
         width={isMobile ? 80 : 120}
+        strokeLinecap="round"
+        trailColor="#f0f0f0"
+        style={{
+          transition: 'all 0.3s ease-in-out'
+        }}
       />
       <Statistic 
         title="使用/总量" 
-        value={systemInfo ? formatGBPair(systemInfo.disk.used, systemInfo.disk.total) : '-'} 
+        value={systemInfo ? formatGBPair(systemInfo.disk.used, systemInfo.disk.total) : '-'}
+        valueStyle={{
+          transition: 'all 0.3s ease-in-out',
+          color: systemInfo?.disk.percent && systemInfo.disk.percent > 80 ? '#ff4d4f' : '#1890ff'
+        }}
       />
     </Card>
   );
@@ -699,8 +872,13 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
   const renderNetworkCard = () => (
     <Card 
       title={<><GlobalOutlined /> 网络状态</>} 
-      loading={loading}
-      style={{marginBottom: isMobile ? 8 : 16, borderRadius: '8px', minHeight: isMobile ? 'auto' : '200px'}}
+      style={{
+        marginBottom: isMobile ? 8 : 16, 
+        borderRadius: '8px', 
+        minHeight: isMobile ? 'auto' : '200px',
+        transition: 'all 0.3s ease-in-out',
+        transform: 'translateZ(0)'
+      }}
       size={isMobile ? "small" : "default"}
     >
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -889,8 +1067,13 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
     <Card 
       title={<><AppstoreOutlined /> 已安装游戏 ({installedGames.length})</>} 
       extra={<Tag color="blue">{formatSize(installedGames.reduce((acc, game) => acc + (game.size_mb || 0), 0))}</Tag>}
-      loading={loading}
-      style={{marginBottom: isMobile ? 8 : 16, borderRadius: '8px', minHeight: isMobile ? 'auto' : '200px'}}
+      style={{
+        marginBottom: isMobile ? 8 : 16, 
+        borderRadius: '8px', 
+        minHeight: isMobile ? 'auto' : '200px',
+        transition: 'all 0.3s ease-in-out',
+        transform: 'translateZ(0)'
+      }}
       size={isMobile ? "small" : "default"}
     >
       <Table 
@@ -909,8 +1092,13 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
   const renderRunningGamesCard = () => (
     <Card 
       title={<><RocketOutlined /> 正在运行的服务器 ({runningGames.length})</>}
-      loading={loading}
-      style={{marginBottom: isMobile ? 8 : 16, borderRadius: '8px', minHeight: isMobile ? 'auto' : '200px'}}
+      style={{
+        marginBottom: isMobile ? 8 : 16, 
+        borderRadius: '8px', 
+        minHeight: isMobile ? 'auto' : '200px',
+        transition: 'all 0.3s ease-in-out',
+        transform: 'translateZ(0)'
+      }}
       size={isMobile ? "small" : "default"}
     >
       <Table 
@@ -940,7 +1128,13 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
         </Button>
       }
       loading={processLoading}
-      style={{marginBottom: isMobile ? 8 : 16, borderRadius: '8px', minHeight: isMobile ? 'auto' : '200px'}}
+      style={{
+        marginBottom: isMobile ? 8 : 16, 
+        borderRadius: '8px', 
+        minHeight: isMobile ? 'auto' : '200px',
+        transition: 'all 0.3s ease-in-out',
+        transform: 'translateZ(0)'
+      }}
       size={isMobile ? "small" : "default"}
     >
       <Table 
@@ -974,8 +1168,13 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
           刷新
         </Button>
       }
-      loading={portLoading}
-      style={{marginBottom: isMobile ? 8 : 16, borderRadius: '8px', minHeight: isMobile ? 'auto' : '200px'}}
+      style={{
+        marginBottom: isMobile ? 8 : 16, 
+        borderRadius: '8px', 
+        minHeight: isMobile ? 'auto' : '200px',
+        transition: 'all 0.3s ease-in-out',
+        transform: 'translateZ(0)'
+      }}
       size={isMobile ? "small" : "default"}
     >
       <Table 
@@ -1231,15 +1430,6 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
           查看容器资源占用情况、已安装游戏和正在运行的游戏服务器
         </Paragraph>
         <Space>
-          <Button
-            type="primary"
-            icon={<ReloadOutlined />}
-            onClick={fetchContainerInfo}
-            loading={loading}
-            size={isMobile ? "small" : "middle"}
-          >
-            刷新信息
-          </Button>
           <Button 
             icon={isDragMode ? <SettingOutlined /> : <DragOutlined />} 
             onClick={() => setIsDragMode(!isDragMode)}

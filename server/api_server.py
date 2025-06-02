@@ -2506,6 +2506,7 @@ def get_container_info():
                 'status': 'success',
                 'system_info': {
                     'cpu_usage': 0,
+                    'cpu_per_core': [],
                     'cpu_model': '获取超时',
                     'cpu_cores': 0,
                     'cpu_logical_cores': 0,
@@ -2569,6 +2570,7 @@ def get_container_info():
                 'status': 'success',
                 'system_info': {
                     'cpu_usage': 0,
+                    'cpu_per_core': [],
                     'cpu_model': cpu_model,
                     'cpu_cores': 0,
                     'cpu_logical_cores': 0,
@@ -2582,6 +2584,7 @@ def get_container_info():
         # 获取系统信息
         system_info = {
             'cpu_usage': psutil.cpu_percent(interval=None),  # 使用非阻塞方式获取CPU使用率
+            'cpu_per_core': psutil.cpu_percent(interval=None, percpu=True),  # 每个核心的使用率
             'cpu_model': cpu_model,
             'cpu_cores': psutil.cpu_count(logical=False),  # 物理核心数
             'cpu_logical_cores': psutil.cpu_count(logical=True),  # 逻辑核心数
@@ -2635,7 +2638,7 @@ def get_container_info():
             
             # 如果有服务器正在运行，跳过详细的空间计算，使用估算值或缓存
             if has_running_servers:
-                logger.info("检测到有服务器正在运行，跳过详细的游戏空间计算")
+                logger.debug("检测到有服务器正在运行，跳过详细的游戏空间计算")
                 
                 # 尝试从缓存加载游戏空间数据
                 try:
@@ -2685,7 +2688,7 @@ def get_container_info():
                             for dirpath, dirnames, filenames in os.walk(game_path):
                                 # 检查是否超过每个游戏的时间限制
                                 if time.time() - game_start_time > time_per_game:
-                                    logger.warning(f"计算游戏 {game_id} 空间占用超时")
+                                    logger.debug(f"计算游戏 {game_id} 空间占用超时")
                                     size = -1  # 使用-1表示计算超时
                                     break
                                     
@@ -6938,6 +6941,80 @@ cd "$(dirname "$0")"
         return jsonify({
             'status': 'error',
             'message': f'部署失败: {str(e)}'
+        }), 500
+
+# 日志管理API
+@app.route('/api/logs/api-server', methods=['GET'])
+@auth_required
+def get_api_server_log():
+    """获取API服务器日志内容"""
+    try:
+        log_file_path = '/home/steam/server/api_server.log'
+        
+        # 检查日志文件是否存在
+        if not os.path.exists(log_file_path):
+            return jsonify({
+                'status': 'success',
+                'content': '日志文件不存在或尚未生成'
+            })
+        
+        # 读取日志文件内容
+        try:
+            with open(log_file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except UnicodeDecodeError:
+            # 如果UTF-8解码失败，尝试其他编码
+            with open(log_file_path, 'r', encoding='latin-1') as f:
+                content = f.read()
+        
+        # 限制返回的内容大小（最后10000行）
+        lines = content.split('\n')
+        if len(lines) > 10000:
+            lines = lines[-10000:]
+            content = '\n'.join(lines)
+            content = '[日志内容过长，仅显示最后10000行]\n\n' + content
+        
+        return jsonify({
+            'status': 'success',
+            'content': content
+        })
+        
+    except Exception as e:
+        logger.error(f"获取API服务器日志失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'获取日志失败: {str(e)}'
+        }), 500
+
+@app.route('/api/logs/api-server/export', methods=['GET'])
+@auth_required
+def export_api_server_log():
+    """导出API服务器日志文件"""
+    try:
+        log_file_path = '/home/steam/server/api_server.log'
+        
+        # 检查日志文件是否存在
+        if not os.path.exists(log_file_path):
+            # 创建一个临时文件包含错误信息
+            temp_content = '日志文件不存在或尚未生成'
+            response = make_response(temp_content)
+            response.headers['Content-Type'] = 'text/plain; charset=utf-8'
+            response.headers['Content-Disposition'] = 'attachment; filename=api_server_empty.log'
+            return response
+        
+        # 直接发送文件
+        return send_file(
+            log_file_path,
+            as_attachment=True,
+            download_name=f'api_server_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.log',
+            mimetype='text/plain'
+        )
+        
+    except Exception as e:
+        logger.error(f"导出API服务器日志失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'导出日志失败: {str(e)}'
         }), 500
 
 if __name__ == '__main__':
