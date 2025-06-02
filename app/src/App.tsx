@@ -2512,7 +2512,7 @@ const App: React.FC = () => {
   // 版本检查相关状态
   const [versionUpdateModalVisible, setVersionUpdateModalVisible] = useState<boolean>(false);
   const [latestVersionInfo, setLatestVersionInfo] = useState<{version: string, description: any} | null>(null);
-  const currentVersion = '2.0.2'; // 当前版本号
+  const currentVersion = '2.0.3'; // 当前版本号
   
   // 版本检查功能
   const checkForUpdates = async () => {
