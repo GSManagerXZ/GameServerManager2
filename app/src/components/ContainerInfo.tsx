@@ -188,6 +188,11 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
               io_stats: networkInfoResp.data.io_stats
             };
             
+            // 保存公网IP信息到localStorage，以便后续刷新时使用
+            if (networkInfoResp.data.public_ip) {
+              localStorage.setItem('cached_public_ip', JSON.stringify(networkInfoResp.data.public_ip));
+            }
+            
             // 更新网络统计数据
             let totalSent = 0;
             let totalRecv = 0;
@@ -202,6 +207,21 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
               sent: [...prev.sent.slice(-9), totalSent],
               recv: [...prev.recv.slice(-9), totalRecv]
             }));
+          } else {
+            // 如果没有获取网络信息，尝试从localStorage恢复公网IP
+            const cachedPublicIp = localStorage.getItem('cached_public_ip');
+            if (cachedPublicIp) {
+              try {
+                const publicIpData = JSON.parse(cachedPublicIp);
+                sysInfo.network = {
+                  interfaces: sysInfo.network?.interfaces || [],
+                  public_ip: publicIpData,
+                  io_stats: sysInfo.network?.io_stats || {}
+                };
+              } catch (error) {
+                console.warn('解析缓存的公网IP信息失败:', error);
+              }
+            }
           }
           
           setSystemInfo(sysInfo);
