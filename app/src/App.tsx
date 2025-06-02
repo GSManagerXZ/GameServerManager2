@@ -2385,7 +2385,7 @@ const App: React.FC = () => {
           
         } catch (error) {
           // 简化错误处理，避免重复消息
-          message.error('加载游戏列表失败，请刷新页面重试');
+          message.error('加载游戏列表失败，请刷新或重新登录');
         } finally {
           setGameLoading(false);
         }

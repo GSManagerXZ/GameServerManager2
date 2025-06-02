@@ -1,6 +1,14 @@
 import axios from 'axios';
 import { GameInfo, InstallEventData } from './types';
 
+// 定义全局的logout回调函数
+let globalLogoutCallback: (() => void) | null = null;
+
+// 设置全局logout回调
+export const setGlobalLogoutCallback = (callback: () => void) => {
+  globalLogoutCallback = callback;
+};
+
 // 当通过外部IP访问时，动态获取当前域名和端口作为API基础URL
 const getApiBaseUrl = () => {
   // 如果是相对路径（通过同一服务器访问），使用相对路径
@@ -39,16 +47,24 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
-    // 如果是401未授权错误，重定向到登录页面
+    // 如果是401未授权错误，自动退出登录
     if (error.response && error.response.status === 401) {
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('username');
+      console.log('检测到401未授权，自动退出登录');
       
-      // 延迟跳转，避免循环重定向
-      if (!window.location.pathname.includes('/login')) {
-        setTimeout(() => {
-          window.location.href = '/login';
-        }, 500);
+      // 如果有全局logout回调，调用它来正确清理状态
+      if (globalLogoutCallback) {
+        globalLogoutCallback();
+      } else {
+        // 如果没有回调，直接清理本地存储并跳转
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('username');
+        
+        // 延迟跳转，避免循环重定向
+        if (!window.location.pathname.includes('/login')) {
+          setTimeout(() => {
+            window.location.href = '/login';
+          }, 500);
+        }
       }
     }
     
