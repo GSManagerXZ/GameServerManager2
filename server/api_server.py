@@ -6173,7 +6173,9 @@ def create_backup_task():
             "enabled": True,
             "nextBackup": next_backup.strftime('%Y-%m-%d %H:%M:%S'),
             "lastBackup": None,
-            "status": "等待中"
+            "status": "等待中",
+            "linkedServerId": data.get('linkedServerId'),  # 关联的服务端ID
+            "autoControl": data.get('autoControl', False)  # 是否自动控制（服务端开启时启用备份，关闭时停用）
         }
         
         backup_tasks[task_id] = task
@@ -6227,6 +6229,10 @@ def update_backup_task(task_id):
             task['intervalUnit'] = data['intervalUnit']
         if 'keepCount' in data:
             task['keepCount'] = int(data['keepCount'])
+        if 'linkedServerId' in data:
+            task['linkedServerId'] = data['linkedServerId']
+        if 'autoControl' in data:
+            task['autoControl'] = data['autoControl']
         
         save_backup_config()
         logger.info(f"更新备份任务: {task['name']}")
@@ -6398,6 +6404,26 @@ def backup_scheduler():
             current_time = datetime.datetime.now()
             
             for task_id, task in backup_tasks.items():
+                # 检查是否启用了自动控制功能
+                if task.get('autoControl', False) and task.get('linkedServerId'):
+                    linked_server_id = task['linkedServerId']
+                    server_running = is_server_running(linked_server_id)
+                    
+                    # 根据服务端状态自动控制备份任务
+                    if server_running and not task.get('enabled', False):
+                        # 服务端运行中但备份任务未启用，自动启用
+                        task['enabled'] = True
+                        task['status'] = '已启用（自动）'
+                        logger.info(f"服务端 {linked_server_id} 运行中，自动启用备份任务: {task['name']}")
+                        save_backup_config()
+                    elif not server_running and task.get('enabled', False):
+                        # 服务端已停止但备份任务仍启用，自动停用
+                        task['enabled'] = False
+                        task['status'] = '已停用（自动）'
+                        logger.info(f"服务端 {linked_server_id} 已停止，自动停用备份任务: {task['name']}")
+                        save_backup_config()
+                
+                # 只有启用的任务才执行备份
                 if not task.get('enabled', False):
                     continue
                     
@@ -6410,6 +6436,12 @@ def backup_scheduler():
                     
                     # 检查是否到了备份时间
                     if current_time >= next_backup_time:
+                        # 如果关联了服务端且启用了自动控制，只有在服务端运行时才执行备份
+                        if task.get('autoControl', False) and task.get('linkedServerId'):
+                            if not is_server_running(task['linkedServerId']):
+                                logger.info(f"跳过备份任务 {task['name']}：关联的服务端 {task['linkedServerId']} 未运行")
+                                continue
+                        
                         logger.info(f"开始执行定时备份任务: {task['name']}")
                         execute_backup_task(task_id, task)
                         
@@ -6467,6 +6499,19 @@ def execute_backup_task(task_id, task):
     except Exception as e:
         task['status'] = '备份失败'
         logger.error(f"执行定时备份任务时出错: {task['name']}, 错误: {str(e)}")
+
+def is_server_running(server_id):
+    """检查指定服务端是否正在运行"""
+    try:
+        if server_id in running_servers:
+            server_data = running_servers[server_id]
+            process = server_data.get('process')
+            if process and process.poll() is None:
+                return True
+        return False
+    except Exception as e:
+        logger.error(f"检查服务端 {server_id} 运行状态时出错: {str(e)}")
+        return False
 
 def start_backup_scheduler():
     """启动备份调度器"""

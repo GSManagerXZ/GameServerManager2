@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Layout, Typography, Row, Col, Card, Button, Spin, message, Tooltip, Modal, Tabs, Form, Input, Menu, Tag, Dropdown, Radio, Drawer, Switch, List, Select } from 'antd';
+import { Layout, Typography, Row, Col, Card, Button, Spin, message, Tooltip, Modal, Tabs, Form, Input, Menu, Tag, Dropdown, Radio, Drawer, Switch, List, Select, Checkbox } from 'antd';
 import { CloudServerOutlined, DashboardOutlined, AppstoreOutlined, PlayCircleOutlined, ReloadOutlined, DownOutlined, InfoCircleOutlined, FolderOutlined, UserOutlined, LogoutOutlined, LockOutlined, GlobalOutlined, MenuOutlined, SettingOutlined, ToolOutlined, BookOutlined, RocketOutlined, HistoryOutlined } from '@ant-design/icons';
 import axios from 'axios';
 // 导入antd样式
@@ -2284,7 +2284,9 @@ const App: React.FC = () => {
       directory: task.directory,
       intervalValue: intervalValue,
       intervalUnit: intervalUnit,
-      keepCount: task.keepCount
+      keepCount: task.keepCount,
+      linkedServerId: task.linkedServerId,
+      autoControl: task.autoControl
     });
     setBackupModalVisible(true);
   };
@@ -3555,6 +3557,11 @@ const App: React.FC = () => {
                               })()}</p>
                               <p>保留: {task.keepCount}份</p>
                               <p>下次备份: {task.nextBackup || '未设置'}</p>
+                              {task.linkedServerId && (
+                                <p>关联服务端: {task.linkedServerId} 
+                                  {task.autoControl && <Tag color="blue" size="small">自动控制</Tag>}
+                                </p>
+                              )}
                             </div>
                             <div style={{display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px'}}>
                               <Button 
@@ -4029,6 +4036,33 @@ const App: React.FC = () => {
             ]}
           >
             <Input type="number" placeholder="例如：7" addonAfter="份" />
+          </Form.Item>
+          
+          <Form.Item
+            name="linkedServerId"
+            label="关联服务端"
+            tooltip="选择要关联的服务端，可实现自动控制备份任务"
+          >
+            <Select placeholder="请选择服务端（可选）" allowClear>
+              {installedGames.map(game => (
+                <Select.Option key={game.id || game} value={game.id || game}>
+                  {game.name || game}
+                </Select.Option>
+              ))}
+              {externalGames.map(game => (
+                <Select.Option key={game.id} value={game.id}>
+                  {game.name} (外部)
+                </Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+          
+          <Form.Item
+            name="autoControl"
+            valuePropName="checked"
+            tooltip="启用后，当关联的服务端启动时自动启用备份任务，服务端停止时自动停用备份任务"
+          >
+            <Checkbox>自动控制（根据服务端状态）</Checkbox>
           </Form.Item>
           
           <div style={{ textAlign: 'center', marginTop: 24 }}>
