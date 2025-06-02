@@ -383,11 +383,43 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
   useEffect(() => {
     // 首次加载时获取包含网络信息的完整数据
     fetchContainerInfo(true);
-    // 根据是否有正在运行的游戏动态设置刷新间隔
-    const refreshInterval = runningGames.length > 0 ? 10000 : 2000; // 有运行游戏时10秒，否则2秒
-    // 定时刷新时不获取网络信息，减少服务器压力
-    const interval = setInterval(() => fetchContainerInfo(false), refreshInterval);
-    return () => clearInterval(interval);
+    
+    let interval: NodeJS.Timeout | null = null;
+    
+    const startRefresh = () => {
+      if (interval) clearInterval(interval);
+      // 根据是否有正在运行的游戏动态设置刷新间隔
+      const refreshInterval = runningGames.length > 0 ? 10000 : 2000; // 有运行游戏时10秒，否则2秒
+      // 定时刷新时不获取网络信息，减少服务器压力
+      interval = setInterval(() => fetchContainerInfo(false), refreshInterval);
+    };
+    
+    const stopRefresh = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+    
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopRefresh(); // 页面失去焦点时停止刷新
+      } else {
+        fetchContainerInfo(false); // 重新获得焦点时立即刷新一次
+        startRefresh(); // 然后开始定时刷新
+      }
+    };
+    
+    // 监听页面可见性变化
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    // 初始启动刷新
+    startRefresh();
+    
+    return () => {
+      stopRefresh();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [runningGames.length]); // 依赖runningGames的长度变化
 
   // 格式化时间显示
