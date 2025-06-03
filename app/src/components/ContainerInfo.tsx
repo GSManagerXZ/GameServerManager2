@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Progress, Statistic, Table, Typography, Button, Space, Row, Col, Divider, Tag, Dropdown, Menu, Alert, Modal, message, Slider } from 'antd';
-import { ReloadOutlined, HddOutlined, RocketOutlined, AppstoreOutlined, DownOutlined, GlobalOutlined, WarningOutlined, DesktopOutlined, ApiOutlined, ExclamationCircleOutlined, StopOutlined, DragOutlined, SettingOutlined } from '@ant-design/icons';
+import { ReloadOutlined, HddOutlined, RocketOutlined, AppstoreOutlined, DownOutlined, GlobalOutlined, WarningOutlined, DesktopOutlined, ApiOutlined, ExclamationCircleOutlined, StopOutlined, DragOutlined, SettingOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import { DragDropContext, Droppable, Draggable, DropResult } from 'react-beautiful-dnd';
 import axios from 'axios';
 import { useIsMobile } from '../hooks/useIsMobile'; // 导入移动端检测钩子
@@ -134,6 +134,7 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
   const [isDragMode, setIsDragMode] = useState<boolean>(false);
   const [settingsVisible, setSettingsVisible] = useState<boolean>(false);
   const [cpuCoresExpanded, setCpuCoresExpanded] = useState<boolean>(false); // CPU核心展开状态
+  const [helpModalVisible, setHelpModalVisible] = useState<boolean>(false); // 帮助弹窗状态
   const isMobile = useIsMobile(); // 检测是否为移动端
 
   const fetchContainerInfo = async (includeNetworkInfo = false) => {
@@ -1209,7 +1210,16 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
   // 渲染活跃端口卡片
   const renderPortsCard = () => (
     <Card 
-      title={<><ApiOutlined /> 活跃端口 ({ports.length})</>}
+      title={
+        <>
+          <ApiOutlined /> 活跃端口 ({ports.length})
+          <QuestionCircleOutlined 
+             style={{ marginLeft: 8, color: '#1677ff', cursor: 'pointer' }}
+             onClick={() => setHelpModalVisible(true)}
+             title="点击查看"
+           />
+        </>
+      }
       extra={
         <Button 
           size="small" 
@@ -1690,6 +1700,31 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
             • 宽度值越小，同一行可以并排显示的卡片越多
           </p>
         </div>
+      </Modal>
+
+      {/* 帮助文档弹窗 */}
+      <Modal
+        title="部署指南"
+        open={helpModalVisible}
+        onCancel={() => setHelpModalVisible(false)}
+        footer={[
+          <Button key="close" type="primary" onClick={() => setHelpModalVisible(false)}>
+            关闭
+          </Button>
+        ]}
+        width={900}
+        style={{ top: 20 }}
+        bodyStyle={{ padding: 0, height: '70vh' }}
+      >
+        <iframe
+          src="http://blogpage.xiaozhuhouses.asia/html6/index.html#/./docs/%E4%BD%BF%E7%94%A8%E6%8A%80%E5%B7%A7"
+          style={{
+            width: '100%',
+            height: '100%',
+            border: 'none'
+          }}
+          title="使用指南"
+        />
       </Modal>
     </div>
   );
