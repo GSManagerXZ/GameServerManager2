@@ -5651,6 +5651,29 @@ def get_sponsor_key():
         logger.error(f"获取赞助者凭证时出错: {str(e)}")
         return jsonify({'status': 'error', 'message': f'获取赞助者凭证失败: {str(e)}'}), 500
 
+@app.route('/api/sponsor', methods=['GET'])
+def get_gold_sponsors():
+    """获取金牌赞助商信息（代理请求解决CORS问题）"""
+    try:
+        # 代理请求到外部API
+        response = requests.get('http://82.156.35.55:5001/sponsor', timeout=10)
+        
+        if response.status_code == 200:
+            return jsonify(response.json())
+        else:
+            logger.error(f"获取金牌赞助商数据失败，状态码: {response.status_code}")
+            return jsonify({'status': 'error', 'message': '获取金牌赞助商数据失败'}), response.status_code
+            
+    except requests.exceptions.Timeout:
+        logger.error("获取金牌赞助商数据超时")
+        return jsonify({'status': 'error', 'message': '请求超时，请稍后重试'}), 408
+    except requests.exceptions.ConnectionError:
+        logger.error("无法连接到金牌赞助商服务器")
+        return jsonify({'status': 'error', 'message': '无法连接到服务器'}), 503
+    except Exception as e:
+        logger.error(f"获取金牌赞助商数据时出错: {str(e)}")
+        return jsonify({'status': 'error', 'message': f'获取数据失败: {str(e)}'}), 500
+
 @app.route('/api/settings/proxy', methods=['POST'])
 @auth_required
 def save_proxy_config():
