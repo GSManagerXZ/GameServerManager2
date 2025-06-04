@@ -179,8 +179,34 @@ const startServer = async (gameId: string, callback?: (line: any) => void, onCom
     return eventSource;
   } catch (error) {
     // console.error('启动服务器函数出错:', error);
-    if (onError) onError(error);
-    throw error;
+    
+    let errorMsg;
+    
+    // 处理axios错误响应，特别是400状态码的错误
+    if (error.response && error.response.status === 400 && error.response.data) {
+      errorMsg = error.response.data.message || '启动失败';
+      console.error(`启动服务器失败 (400): ${errorMsg}`);
+    }
+    // 处理其他axios错误
+    else if (error.response && error.response.data && error.response.data.message) {
+      errorMsg = error.response.data.message;
+      console.error(`启动服务器失败: ${errorMsg}`);
+    }
+    // 处理网络错误或其他错误
+    else {
+      errorMsg = error.message || '启动服务器时发生未知错误';
+    }
+    
+    // 创建统一的错误对象
+    const finalError = new Error(errorMsg);
+    
+    // 只调用onError回调，不再抛出错误，避免重复处理
+    if (onError) {
+      onError(finalError);
+    } else {
+      // 如果没有onError回调，才抛出错误
+      throw finalError;
+    }
   }
 };
 
