@@ -1245,23 +1245,57 @@ body {
 .login-form-button {
   position: relative;
   overflow: hidden;
-  transition: all 0.15s;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   background-image: linear-gradient(135deg, #1677ff 0%, #69b1ff 100%);
   border: none;
   height: 45px;
   margin-top: 10px;
   box-shadow: 0 4px 8px rgba(22, 119, 255, 0.3);
+  cursor: pointer;
+  transform-style: preserve-3d;
+  perspective: 1000px;
+  will-change: transform;
+}
+
+.login-form-button::before {
+  content: '';
+  position: absolute;
+  top: var(--mouse-y, 50%);
+  left: var(--mouse-x, 50%);
+  width: 0;
+  height: 0;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.3) 0%, transparent 70%);
+  transition: width 0.6s ease, height 0.6s ease;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0.8;
 }
 
 .login-form-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 12px rgba(22, 119, 255, 0.4);
+  transform: translateY(-4px) rotateX(calc(var(--delta-y, 0) * -10deg)) rotateY(calc(var(--delta-x, 0) * 10deg)) translateZ(10px);
+  box-shadow: 0 8px 20px rgba(22, 119, 255, 0.5), 0 4px 8px rgba(22, 119, 255, 0.3);
   background-image: linear-gradient(135deg, #1677ff 10%, #69b1ff 90%);
+  perspective: 1000px;
+}
+
+.login-form-button:hover::before {
+  width: 150px;
+  height: 150px;
+  transition: width 0.4s ease, height 0.4s ease;
 }
 
 .login-form-button:active {
-  transform: translateY(0);
+  transform: translateY(0) scale(0.98);
   box-shadow: 0 2px 6px rgba(22, 119, 255, 0.3);
+}
+
+.login-form-button:active::before {
+  width: 100px;
+  height: 100px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.6) 0%, transparent 70%);
+  transition: all 0.2s ease;
+  opacity: 1;
 }
 
 .login-success {
@@ -1369,23 +1403,57 @@ body {
 .register-form-button {
   position: relative;
   overflow: hidden;
-  transition: all 0.15s;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   background-image: linear-gradient(135deg, #52c41a 0%, #73d13d 100%);
   border: none;
   height: 45px;
   margin-top: 10px;
   box-shadow: 0 4px 8px rgba(82, 196, 26, 0.3);
+  cursor: pointer;
+  transform-style: preserve-3d;
+  perspective: 1000px;
+  will-change: transform;
+}
+
+.register-form-button::before {
+  content: '';
+  position: absolute;
+  top: var(--mouse-y, 50%);
+  left: var(--mouse-x, 50%);
+  width: 0;
+  height: 0;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.3) 0%, transparent 70%);
+  transition: width 0.6s ease, height 0.6s ease;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0.8;
 }
 
 .register-form-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 12px rgba(82, 196, 26, 0.4);
+  transform: translateY(-4px) rotateX(calc(var(--delta-y, 0) * -10deg)) rotateY(calc(var(--delta-x, 0) * 10deg)) translateZ(10px);
+  box-shadow: 0 8px 20px rgba(82, 196, 26, 0.5), 0 4px 8px rgba(82, 196, 26, 0.3);
   background-image: linear-gradient(135deg, #52c41a 10%, #73d13d 90%);
+  perspective: 1000px;
+}
+
+.register-form-button:hover::before {
+  width: 150px;
+  height: 150px;
+  transition: width 0.4s ease, height 0.4s ease;
 }
 
 .register-form-button:active {
-  transform: translateY(0);
+  transform: translateY(0) scale(0.98);
   box-shadow: 0 2px 6px rgba(82, 196, 26, 0.3);
+}
+
+.register-form-button:active::before {
+  width: 100px;
+  height: 100px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.6) 0%, transparent 70%);
+  transition: all 0.2s ease;
+  opacity: 1;
 }
 
 .register-success {

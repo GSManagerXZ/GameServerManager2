@@ -172,6 +172,39 @@ const Register: React.FC<RegisterProps> = ({ onRegisterSuccess }) => {
     }, 100);
   };
 
+  // 处理按钮鼠标移动事件，创建跟随鼠标的光影效果
+  const handleButtonMouseMove = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const button = e.currentTarget;
+    const rect = button.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    // 计算鼠标相对于按钮中心的位置
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    const deltaX = (x - centerX) / centerX;
+    const deltaY = (y - centerY) / centerY;
+    
+    // 增强3D效果的计算
+    const enhancedDeltaX = deltaX * 2; // 增加倾斜幅度
+    const enhancedDeltaY = deltaY * 2;
+    
+    // 设置CSS变量来控制光影位置
+    button.style.setProperty('--mouse-x', `${x}px`);
+    button.style.setProperty('--mouse-y', `${y}px`);
+    button.style.setProperty('--delta-x', enhancedDeltaX.toString());
+    button.style.setProperty('--delta-y', enhancedDeltaY.toString());
+  };
+
+  // 处理按钮鼠标离开事件
+  const handleButtonMouseLeave = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const button = e.currentTarget;
+    button.style.removeProperty('--mouse-x');
+    button.style.removeProperty('--mouse-y');
+    button.style.removeProperty('--delta-x');
+    button.style.removeProperty('--delta-y');
+  };
+
   return (
     <div className={`register-container ${registerSuccess ? 'register-success' : ''}`}>
       <Card 
@@ -232,6 +265,8 @@ const Register: React.FC<RegisterProps> = ({ onRegisterSuccess }) => {
               loading={loading}
               block
               className="register-form-button"
+              onMouseMove={handleButtonMouseMove}
+              onMouseLeave={handleButtonMouseLeave}
             >
               注册
             </Button>
