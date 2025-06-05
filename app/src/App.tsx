@@ -653,6 +653,81 @@ const App: React.FC = () => {
     return savedPreference === null ? true : savedPreference === 'true';
   });
   
+  // 新增：当前背景图片URL
+  const [currentBackgroundUrl, setCurrentBackgroundUrl] = useState<string>('https://t.alcy.cc/ycy');
+  
+  // 新增：背景图片API列表
+  const backgroundApis = [
+    'https://t.alcy.cc/ycy',
+    'https://random-image-api.bakacookie520.top/pc-dark'
+  ];
+  
+  // 新增：竞速加载背景图片
+  const loadRandomBackground = useCallback(() => {
+    if (!enableRandomBackground) return;
+    
+    // 创建Promise数组，每个API一个Promise
+    const imagePromises = backgroundApis.map((apiUrl, index) => {
+      return new Promise<{url: string, index: number}>((resolve, reject) => {
+        const img = new Image();
+        const timestamp = Date.now();
+        const urlWithTimestamp = `${apiUrl}${apiUrl.includes('?') ? '&' : '?'}t=${timestamp}`;
+        
+        img.onload = () => {
+          resolve({ url: urlWithTimestamp, index });
+        };
+        
+        img.onerror = () => {
+          reject(new Error(`Failed to load image from API ${index + 1}`));
+        };
+        
+        // 设置超时时间为5秒
+        setTimeout(() => {
+          reject(new Error(`Timeout loading image from API ${index + 1}`));
+        }, 5000);
+        
+        img.src = urlWithTimestamp;
+      });
+    });
+    
+    // 使用Promise.race来获取最快加载完成的图片
+    Promise.race(imagePromises)
+      .then(({ url }) => {
+        setCurrentBackgroundUrl(url);
+        console.log('背景图片加载成功:', url);
+      })
+      .catch((error) => {
+        console.warn('所有背景图片API加载失败，使用默认图片:', error);
+        // 如果所有API都失败，使用第一个API作为备用
+        setCurrentBackgroundUrl(backgroundApis[0]);
+      });
+  }, [enableRandomBackground]);
+  
+  // 新增：在组件挂载时和背景开关变化时加载随机背景
+  useEffect(() => {
+    loadRandomBackground();
+  }, [loadRandomBackground]);
+  
+  // 新增：每30秒刷新一次背景图片
+  useEffect(() => {
+    if (!enableRandomBackground) return;
+    
+    const interval = setInterval(() => {
+      loadRandomBackground();
+    }, 30000); // 30秒
+    
+    return () => clearInterval(interval);
+  }, [loadRandomBackground]);
+  
+  // 新增：动态设置CSS变量来更新背景图片
+  useEffect(() => {
+    if (enableRandomBackground && currentBackgroundUrl) {
+      document.documentElement.style.setProperty('--dynamic-bg-url', `url('${currentBackgroundUrl}')`);
+    } else {
+      document.documentElement.style.removeProperty('--dynamic-bg-url');
+    }
+  }, [currentBackgroundUrl, enableRandomBackground]);
+  
   // 新增：是否启用不活动透明效果
   const [enableInactiveEffect, setEnableInactiveEffect] = useState<boolean>(() => {
     // 从localStorage读取用户偏好设置，默认开启

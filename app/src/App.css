@@ -1145,7 +1145,7 @@ body {
   justify-content: center;
   align-items: center;
   height: 100vh;
-  background: url('https://t.alcy.cc/ycy') center center no-repeat fixed;
+  background: var(--dynamic-bg-url, url('https://t.alcy.cc/ycy')) center center no-repeat fixed;
   background-size: cover;
   animation: fadeIn 0.8s ease-out;
   position: relative;
@@ -1714,7 +1714,7 @@ body {
 
 /* 背景图片和毛玻璃效果切换样式 */
 .with-random-bg {
-  background: url('https://t.alcy.cc/ycy') center center no-repeat fixed;
+  background: var(--dynamic-bg-url, url('https://t.alcy.cc/ycy')) center center no-repeat fixed;
   background-size: cover;
   position: relative;
 }
@@ -1793,7 +1793,7 @@ body {
   justify-content: center;
   align-items: center;
   height: 100vh;
-  background: url('https://t.alcy.cc/ycy') center center no-repeat fixed;
+  background: var(--dynamic-bg-url, url('https://t.alcy.cc/ycy')) center center no-repeat fixed;
   background-size: cover;
   animation: fadeIn 0.8s ease-out;
   position: relative;
