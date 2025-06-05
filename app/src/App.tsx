@@ -848,23 +848,25 @@ const App: React.FC = () => {
   const [collapsed, setCollapsed] = useState<boolean>(false);
   const [fileManagerVisible, setFileManagerVisible_orig] = useState<boolean>(false);
   const [fileManagerPath, setFileManagerPath_orig] = useState<string>('/home/steam');
+  const [isTransitioning, setIsTransitioning] = useState<boolean>(false);
 
   // Wrapped state setters with logging
   const setCurrentNav = (nav: string) => {
-    // const timestamp = () => new Date().toLocaleTimeString();
-    // console.log(`${timestamp()} APP: setCurrentNav called with: ${nav}. Current fileManagerVisible: ${fileManagerVisible}`);
-    setCurrentNav_orig(nav);
+    if (nav !== currentNav) {
+      setIsTransitioning(true);
+      setTimeout(() => {
+        setCurrentNav_orig(nav);
+        setIsTransitioning(false);
+      }, 300); // 匹配 CSS navFadeOut 动画时间 0.3s
+    }
+    // 如果 nav === currentNav，则不执行任何操作以避免不必要的重渲染
   };
 
   const setFileManagerVisible = (visible: boolean) => {
-    // const timestamp = () => new Date().toLocaleTimeString();
-    // console.log(`${timestamp()} APP: setFileManagerVisible called with: ${visible}. Current nav: ${currentNav}`);
     setFileManagerVisible_orig(visible);
   };
 
   const setFileManagerPath = (path: string) => {
-    // const timestamp = () => new Date().toLocaleTimeString();
-    // console.log(`${timestamp()} APP: setFileManagerPath called with: ${path}`);
     setFileManagerPath_orig(path);
   };
   
@@ -3009,16 +3011,19 @@ const App: React.FC = () => {
         
         <Content style={{ width: '100%', maxWidth: '100%', margin: 0, padding: isMobile ? '4px' : '16px' }}>
           {currentNav === 'dashboard' && (
-            <ContainerInfo 
-              onStartServer={handleStartServer}
-              onStopServer={handleStopServer}
-              onUninstallGame={handleUninstall}
-            />
+            <div className={`nav-content ${isTransitioning ? 'fade-out' : ''}`}>
+              <ContainerInfo 
+                onStartServer={handleStartServer}
+                onStopServer={handleStopServer}
+                onUninstallGame={handleUninstall}
+              />
+            </div>
           )}
           
           {currentNav === 'games' && (
-            <div className="game-cards">
-              <Title level={2}>游戏服务器管理</Title>
+            <div className={`nav-content ${isTransitioning ? 'fade-out' : ''}`}>
+              <div className="game-cards">
+                <Title level={2}>游戏服务器管理</Title>
               <Tabs activeKey={tabKey} onChange={setTabKey}>
                 <TabPane tab="快速部署" key="install">
                   {gameLoading ? (
@@ -3174,12 +3179,14 @@ const App: React.FC = () => {
                   </div>
                 </TabPane>
               </Tabs>
+              </div>
             </div>
           )}
           
           {currentNav === 'servers' && (
-            <div className="running-servers">
-              <Title level={2}>服务端管理</Title>
+            <div className={`nav-content ${isTransitioning ? 'fade-out' : ''}`}>
+              <div className="running-servers">
+                <Title level={2}>服务端管理</Title>
               <Tabs defaultActiveKey="all" onChange={handleTabChange}>
                 <TabPane tab="全部服务端" key="all">
                   <div className="server-management">
@@ -3722,47 +3729,60 @@ const App: React.FC = () => {
                   </div>
                 </TabPane>
               </Tabs>
+              </div>
             </div>
           )}
 
           {currentNav === 'files' && (
-            <div className="file-management">
-              <Title level={2}>文件管理</Title>
-              <FileManager 
-                initialPath={fileManagerPath || '/home/steam'} 
-                // This FileManager is part of the main navigation.
-                // Its visibility is tied to whether 'files' is the currentNav.
-                isVisible={currentNav === 'files'} 
-              />
+            <div className={`nav-content ${isTransitioning ? 'fade-out' : ''}`}>
+              <div className="file-management">
+                <Title level={2}>文件管理</Title>
+                <FileManager 
+                  initialPath={fileManagerPath || '/home/steam'} 
+                  // This FileManager is part of the main navigation.
+                  // Its visibility is tied to whether 'files' is the currentNav.
+                  isVisible={currentNav === 'files'} 
+                />
+              </div>
             </div>
           )}
 
           {currentNav === 'frp' && (
-            <div className="frp-management">
-              <FrpManager />
+            <div className={`nav-content ${isTransitioning ? 'fade-out' : ''}`}>
+              <div className="frp-management">
+                <FrpManager />
+              </div>
             </div>
           )}
           
           {currentNav === 'about' && (
-            <div className="about-page">
-              <About />
+            <div className={`nav-content ${isTransitioning ? 'fade-out' : ''}`}>
+              <div className="about-page">
+                <About />
+              </div>
             </div>
           )}
           
           {currentNav === 'server-guide' && (
-            <div className="server-guide-page">
-              <ServerGuide />
+            <div className={`nav-content ${isTransitioning ? 'fade-out' : ''}`}>
+              <div className="server-guide-page">
+                <ServerGuide />
+              </div>
             </div>
           )}
           
           {currentNav === 'settings' && (
-            <div className="settings-page">
-              <Settings />
+            <div className={`nav-content ${isTransitioning ? 'fade-out' : ''}`}>
+              <div className="settings-page">
+                <Settings />
+              </div>
             </div>
           )}
           {currentNav === 'environment' && (
-            <div className="environment-page">
-              <Environment />
+            <div className={`nav-content ${isTransitioning ? 'fade-out' : ''}`}>
+              <div className="environment-page">
+                <Environment />
+              </div>
             </div>
           )}
         </Content>
