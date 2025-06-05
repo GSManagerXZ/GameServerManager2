@@ -673,18 +673,23 @@ const App: React.FC = () => {
         const timestamp = Date.now();
         const urlWithTimestamp = `${apiUrl}${apiUrl.includes('?') ? '&' : '?'}t=${timestamp}`;
         
+        // 移除跨域属性以避免CORS错误
+        // img.crossOrigin = 'anonymous';
+        
+        const timeoutId = setTimeout(() => {
+          reject(new Error(`Timeout loading image from API ${index + 1}: ${apiUrl}`));
+        }, 8000); // 增加超时时间到8秒
+        
         img.onload = () => {
+          clearTimeout(timeoutId);
           resolve({ url: urlWithTimestamp, index });
         };
         
-        img.onerror = () => {
-          reject(new Error(`Failed to load image from API ${index + 1}`));
+        img.onerror = (event) => {
+          clearTimeout(timeoutId);
+          console.warn(`API ${index + 1} (${apiUrl}) 加载失败:`, event);
+          reject(new Error(`Failed to load image from API ${index + 1}: ${apiUrl}`));
         };
-        
-        // 设置超时时间为5秒
-        setTimeout(() => {
-          reject(new Error(`Timeout loading image from API ${index + 1}`));
-        }, 5000);
         
         img.src = urlWithTimestamp;
       });
@@ -692,14 +697,26 @@ const App: React.FC = () => {
     
     // 使用Promise.race来获取最快加载完成的图片
     Promise.race(imagePromises)
-      .then(({ url }) => {
+      .then(({ url, index }) => {
         setCurrentBackgroundUrl(url);
-        console.log('背景图片加载成功:', url);
+        console.log(`背景图片加载成功 (API ${index + 1}):`, url);
       })
       .catch((error) => {
-        console.warn('所有背景图片API加载失败，使用默认图片:', error);
-        // 如果所有API都失败，使用第一个API作为备用
-        setCurrentBackgroundUrl(backgroundApis[0]);
+        console.warn('竞速加载失败，尝试逐个加载:', error);
+        
+        // 如果竞速失败，尝试逐个加载
+        Promise.allSettled(imagePromises)
+          .then((results) => {
+            const successResult = results.find(result => result.status === 'fulfilled');
+            if (successResult && successResult.status === 'fulfilled') {
+              setCurrentBackgroundUrl(successResult.value.url);
+              console.log(`背景图片备用加载成功 (API ${successResult.value.index + 1}):`, successResult.value.url);
+            } else {
+              console.warn('所有背景图片API都加载失败，使用默认图片');
+              // 如果所有API都失败，直接使用第一个API URL（不带时间戳）
+              setCurrentBackgroundUrl(backgroundApis[0]);
+            }
+          });
       });
   }, [enableRandomBackground]);
   
