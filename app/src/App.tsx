@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Layout, Typography, Row, Col, Card, Button, Spin, message, Tooltip, Modal, Tabs, Form, Input, Menu, Tag, Dropdown, Radio, Drawer, Switch, List, Select, Checkbox } from 'antd';
+import { Layout, Typography, Row, Col, Card, Button, Spin, message, Tooltip, Modal, Tabs, Form, Input, Menu, Tag, Dropdown, Radio, Drawer, Switch, List, Select, Checkbox, Upload } from 'antd';
 import { CloudServerOutlined, DashboardOutlined, AppstoreOutlined, PlayCircleOutlined, ReloadOutlined, DownOutlined, InfoCircleOutlined, FolderOutlined, UserOutlined, LogoutOutlined, LockOutlined, GlobalOutlined, MenuOutlined, SettingOutlined, ToolOutlined, BookOutlined, RocketOutlined, HistoryOutlined } from '@ant-design/icons';
 import axios from 'axios';
 // 导入antd样式
@@ -609,6 +609,258 @@ const MinecraftDeploy: React.FC = () => {
           </Button>
         </div>
       )}
+    </div>
+  );
+};
+
+// 半自动部署组件
+const SemiAutoDeploy: React.FC = () => {
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [serverName, setServerName] = useState<string>('');
+  const [serverType, setServerType] = useState<string>('');
+  const [selectedJdk, setSelectedJdk] = useState<string>('');
+  const [installedJdks, setInstalledJdks] = useState<any[]>([]);
+  const [uploading, setUploading] = useState<boolean>(false);
+  const [deploying, setDeploying] = useState<boolean>(false);
+
+  // 获取已安装的JDK列表
+  const fetchInstalledJdks = async () => {
+    try {
+      const response = await axios.get('/api/environment/java/versions');
+      if (response.data.status === 'success') {
+        const installedJdks = response.data.versions.filter((jdk: any) => jdk.installed);
+        setInstalledJdks(installedJdks);
+      } else {
+        message.error(response.data.message || '获取JDK列表失败');
+      }
+    } catch (error: any) {
+      message.error('获取JDK列表失败: ' + (error.response?.data?.message || error.message));
+    }
+  };
+
+  // 处理文件选择
+  const handleFileChange = (info: any) => {
+    const { file } = info;
+    if (file.status === 'removed') {
+      setUploadFile(null);
+      setServerName('');
+      return;
+    }
+    
+    setUploadFile(file.originFileObj || file);
+    
+    // 根据文件名自动设置服务器名称
+    const fileName = file.name;
+    const nameWithoutExt = fileName.replace(/\.(zip|rar|tar\.gz|tar|7z)$/i, '');
+    setServerName(nameWithoutExt);
+  };
+
+  // 上传并部署
+  const handleDeploy = async () => {
+    if (!uploadFile) {
+      message.error('请选择要上传的压缩包');
+      return;
+    }
+    
+    if (!serverName.trim()) {
+      message.error('请输入服务器名称');
+      return;
+    }
+    
+    if (!serverType) {
+      message.error('请选择服务端类型');
+      return;
+    }
+
+    try {
+      setUploading(true);
+      
+      // 创建FormData
+      const formData = new FormData();
+      formData.append('file', uploadFile);
+      formData.append('server_name', serverName.trim());
+      formData.append('server_type', serverType);
+      if (selectedJdk) {
+        formData.append('jdk_version', selectedJdk);
+      }
+      
+      // 上传文件并部署
+      const response = await axios.post('/api/semi-auto-deploy', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        onUploadProgress: (progressEvent) => {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / (progressEvent.total || 1));
+          message.loading(`上传中... ${percentCompleted}%`, 0);
+        }
+      });
+      
+      message.destroy(); // 清除上传进度消息
+      
+      if (response.data.status === 'success') {
+        message.success('服务器部署成功!');
+        Modal.success({
+          title: '部署成功',
+          content: (
+            <div>
+              <p>服务器已成功部署到: {response.data.data.game_dir}</p>
+              <p>服务器名称: {response.data.data.server_name}</p>
+              {response.data.data.start_script && (
+                <p>启动脚本: {response.data.data.start_script}</p>
+              )}
+              <p>您可以在"服务端管理"页面启动服务器</p>
+            </div>
+          )
+        });
+        
+        // 重置表单
+        setUploadFile(null);
+        setServerName('');
+        setServerType('');
+        setSelectedJdk('');
+      } else {
+        message.error(response.data.message || '部署失败');
+      }
+    } catch (error: any) {
+      message.destroy();
+      message.error('部署失败: ' + (error.response?.data?.message || error.message));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // 组件挂载时获取JDK列表
+  React.useEffect(() => {
+    fetchInstalledJdks();
+  }, []);
+
+  return (
+    <div>
+      <Row gutter={[16, 16]}>
+        <Col span={24}>
+          <Title level={4}>上传服务端压缩包</Title>
+          <Upload.Dragger
+            name="file"
+            multiple={false}
+            accept=".zip,.rar,.tar.gz,.tar,.7z"
+            beforeUpload={() => false} // 阻止自动上传
+            onChange={handleFileChange}
+            fileList={uploadFile ? [{
+              uid: '1',
+              name: uploadFile.name,
+              status: 'done' as const,
+              size: uploadFile.size
+            }] : []}
+          >
+            <p className="ant-upload-drag-icon">
+              <CloudServerOutlined />
+            </p>
+            <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
+            <p className="ant-upload-hint">
+              支持 .zip, .rar, .tar.gz, .tar, .7z 格式的压缩包
+            </p>
+          </Upload.Dragger>
+        </Col>
+
+        {uploadFile && (
+          <>
+            <Col span={24}>
+              <Title level={4}>服务器名称</Title>
+              <Input
+                placeholder="请输入服务器名称（将作为目录名）"
+                value={serverName}
+                onChange={(e) => setServerName(e.target.value)}
+              />
+              <div style={{ marginTop: '8px', color: '#666', fontSize: '12px' }}>
+                服务器将部署到: /home/steam/games/{serverName || '服务器名称'}
+              </div>
+            </Col>
+
+            <Col span={24}>
+              <Title level={4}>服务端类型</Title>
+              <Radio.Group
+                value={serverType}
+                onChange={(e) => setServerType(e.target.value)}
+                style={{ width: '100%' }}
+              >
+                <Radio.Button value="java" style={{ width: '50%', textAlign: 'center' }}>
+                  Java
+                </Radio.Button>
+                <Radio.Button value="other" style={{ width: '50%', textAlign: 'center' }}>
+                  其它
+                </Radio.Button>
+              </Radio.Group>
+            </Col>
+
+            {serverType === 'java' && (
+              <Col span={24}>
+                <Title level={4}>Java环境选择</Title>
+                <Select
+                  style={{ width: '100%' }}
+                  placeholder="请选择Java版本"
+                  value={selectedJdk}
+                  onChange={setSelectedJdk}
+                  allowClear
+                >
+                  {installedJdks.map(jdk => (
+                    <Option key={jdk.id} value={jdk.id}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>{jdk.name}</span>
+                        <span style={{ color: '#666', fontSize: '12px' }}>{jdk.version}</span>
+                      </div>
+                    </Option>
+                  ))}
+                </Select>
+                <div style={{ marginTop: '8px', color: '#666', fontSize: '12px' }}>
+                  {installedJdks.length === 0 ? (
+                    <span>未检测到已安装的JDK，将使用系统默认Java。您可以在"环境安装"-"Java环境"中安装JDK。</span>
+                  ) : (
+                    <span>选择特定的JDK版本，或留空使用系统默认Java</span>
+                  )}
+                </div>
+              </Col>
+            )}
+
+            {serverName && serverType && (
+              <Col span={24}>
+                <Card style={{ backgroundColor: '#f6f8fa', border: '1px solid #d1d9e0' }}>
+                  <Title level={5}>部署信息确认</Title>
+                  <Row gutter={[16, 8]}>
+                    <Col span={12}>
+                      <strong>压缩包:</strong> {uploadFile.name}
+                    </Col>
+                    <Col span={12}>
+                      <strong>文件大小:</strong> {(uploadFile.size / 1024 / 1024).toFixed(2)} MB
+                    </Col>
+                    <Col span={12}>
+                      <strong>服务器名称:</strong> {serverName}
+                    </Col>
+                    <Col span={12}>
+                      <strong>服务端类型:</strong> {serverType === 'java' ? 'Java' : '其它'}
+                    </Col>
+                    {serverType === 'java' && (
+                      <Col span={12}>
+                        <strong>Java环境:</strong> {selectedJdk ? installedJdks.find(jdk => jdk.id === selectedJdk)?.name || selectedJdk : '系统默认Java'}
+                      </Col>
+                    )}
+                  </Row>
+                  <div style={{ marginTop: '16px', textAlign: 'center' }}>
+                    <Button
+                      type="primary"
+                      size="large"
+                      onClick={handleDeploy}
+                      loading={uploading}
+                      icon={<RocketOutlined />}
+                    >
+                      {uploading ? '部署中...' : '开始部署'}
+                    </Button>
+                  </div>
+                </Card>
+              </Col>
+            )}
+          </>
+        )}
+      </Row>
     </div>
   );
 };
@@ -3175,6 +3427,13 @@ const App: React.FC = () => {
                   <div style={{ maxWidth: 1000, margin: '0 auto', padding: '20px 0' }}>
                     <Card title="Minecraft服务器快速部署">
                       <MinecraftDeploy />
+                    </Card>
+                  </div>
+                </TabPane>
+                <TabPane tab="半自动部署" key="semi-auto-deploy">
+                  <div style={{ maxWidth: 1000, margin: '0 auto', padding: '20px 0' }}>
+                    <Card title="半自动部署">
+                      <SemiAutoDeploy />
                     </Card>
                   </div>
                 </TabPane>

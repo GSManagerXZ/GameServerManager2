@@ -3766,6 +3766,190 @@ def rename_item():
         logger.error(f"重命名文件/目录时出错: {str(e)}")
         return jsonify({'status': 'error', 'message': f'重命名失败: {str(e)}'})
 
+@app.route('/api/semi-auto-deploy', methods=['POST'])
+@auth_required
+def semi_auto_deploy():
+    """半自动部署服务器"""
+    try:
+        # 检查是否有文件
+        if 'file' not in request.files:
+            return jsonify({'status': 'error', 'message': '没有文件'}), 400
+            
+        file = request.files['file']
+        server_name = request.form.get('server_name', '').strip()
+        server_type = request.form.get('server_type', '').strip()
+        jdk_version = request.form.get('jdk_version', '').strip()
+        
+        # 验证参数
+        if not server_name:
+            return jsonify({'status': 'error', 'message': '服务器名称不能为空'}), 400
+            
+        if not server_type:
+            return jsonify({'status': 'error', 'message': '请选择服务端类型'}), 400
+            
+        if file.filename == '':
+            return jsonify({'status': 'error', 'message': '没有选择文件'}), 400
+            
+        # 安全处理文件名
+        filename = secure_filename(file.filename)
+        
+        # 检查文件扩展名
+        allowed_extensions = ['.zip', '.rar', '.tar.gz', '.tar', '.7z']
+        if not any(filename.lower().endswith(ext) for ext in allowed_extensions):
+            return jsonify({'status': 'error', 'message': '不支持的文件格式，请上传 .zip, .rar, .tar.gz, .tar, .7z 格式的压缩包'}), 400
+            
+        # 创建游戏目录
+        games_dir = "/home/steam/games"
+        game_dir = os.path.join(games_dir, server_name)
+        
+        # 检查目录是否已存在
+        if os.path.exists(game_dir):
+            return jsonify({'status': 'error', 'message': f'服务器 {server_name} 已存在，请选择其他名称'}), 400
+            
+        # 确保games目录存在
+        os.makedirs(games_dir, exist_ok=True)
+        os.makedirs(game_dir, exist_ok=True)
+        
+        # 保存上传的文件到临时位置
+        temp_file = os.path.join(game_dir, filename)
+        file.save(temp_file)
+        
+        logger.info(f"文件已上传: {temp_file}, 用户: {g.user.get('username')}")
+        
+        # 解压文件
+        try:
+            if filename.lower().endswith('.zip'):
+                with zipfile.ZipFile(temp_file, 'r') as zip_ref:
+                    zip_ref.extractall(game_dir)
+            elif filename.lower().endswith('.rar'):
+                with rarfile.RarFile(temp_file, 'r') as rar_ref:
+                    rar_ref.extractall(game_dir)
+            elif filename.lower().endswith(('.tar.gz', '.tar')):
+                with tarfile.open(temp_file, 'r:*') as tar_ref:
+                    tar_ref.extractall(game_dir)
+            elif filename.lower().endswith('.7z'):
+                # 使用7z命令行工具
+                result = subprocess.run(['7z', 'x', temp_file, f'-o{game_dir}'], 
+                                      capture_output=True, text=True)
+                if result.returncode != 0:
+                    raise Exception(f"7z解压失败: {result.stderr}")
+            else:
+                raise Exception("不支持的压缩格式")
+                
+            logger.info(f"文件解压成功: {game_dir}")
+            
+        except Exception as e:
+            # 清理失败的目录
+            if os.path.exists(game_dir):
+                shutil.rmtree(game_dir)
+            logger.error(f"解压文件失败: {str(e)}")
+            return jsonify({'status': 'error', 'message': f'解压文件失败: {str(e)}'}), 500
+            
+        # 删除原始压缩包
+        try:
+            os.remove(temp_file)
+        except:
+            pass
+            
+        # 设置目录权限
+        try:
+            subprocess.run(['chown', '-R', 'steam:steam', game_dir], check=True)
+        except:
+            logger.warning(f"设置目录权限失败: {game_dir}")
+            
+        # 如果是Java类型，生成启动脚本
+        start_script = None
+        if server_type == 'java':
+            start_script = generate_java_start_script(game_dir, server_name, jdk_version)
+            
+        return jsonify({
+            'status': 'success',
+            'message': '服务器部署成功',
+            'data': {
+                'server_name': server_name,
+                'game_dir': game_dir,
+                'server_type': server_type,
+                'start_script': start_script
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"半自动部署时出错: {str(e)}")
+        return jsonify({'status': 'error', 'message': f'部署失败: {str(e)}'}), 500
+
+def generate_java_start_script(game_dir, server_name, jdk_version=None):
+    """生成Java启动脚本"""
+    try:
+        # 查找jar文件
+        jar_files = []
+        for root, dirs, files in os.walk(game_dir):
+            for file in files:
+                if file.lower().endswith('.jar') and not file.lower().startswith('libraries'):
+                    jar_files.append(os.path.relpath(os.path.join(root, file), game_dir))
+                    
+        if not jar_files:
+            logger.warning(f"在 {game_dir} 中未找到jar文件")
+            return None
+            
+        # 选择最可能的服务端jar文件
+        server_jar = None
+        for jar in jar_files:
+            jar_name = os.path.basename(jar).lower()
+            if any(keyword in jar_name for keyword in ['server', 'spigot', 'paper', 'bukkit', 'forge', 'fabric']):
+                server_jar = jar
+                break
+                
+        if not server_jar:
+            # 如果没找到明显的服务端jar，使用第一个
+            server_jar = jar_files[0]
+            
+        # 确定Java可执行文件路径
+        java_executable = "java"
+        if jdk_version and jdk_version in JAVA_VERSIONS:
+            java_dir = JAVA_VERSIONS[jdk_version]["dir"]
+            java_executable = os.path.join(java_dir, "bin/java")
+            
+        # 生成启动脚本内容
+        script_content = f"""#!/bin/bash
+# {server_name} 服务器启动脚本
+# 自动生成于 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+cd "$(dirname "$0")"
+
+# Java可执行文件路径
+JAVA_EXEC="{java_executable}"
+
+# 服务端jar文件
+SERVER_JAR="{server_jar}"
+
+# JVM参数
+JVM_ARGS="-Xmx2G -Xms1G -XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200 -XX:+UnlockExperimentalVMOptions -XX:+DisableExplicitGC -XX:+AlwaysPreTouch -XX:G1NewSizePercent=30 -XX:G1MaxNewSizePercent=40 -XX:G1HeapRegionSize=8M -XX:G1ReservePercent=20 -XX:G1HeapWastePercent=5 -XX:G1MixedGCCountTarget=4 -XX:InitiatingHeapOccupancyPercent=15 -XX:G1MixedGCLiveThresholdPercent=90 -XX:G1RSetUpdatingPauseTimePercent=5 -XX:SurvivorRatio=32 -XX:+PerfDisableSharedMem -XX:MaxTenuringThreshold=1"
+
+# 启动服务器
+echo "正在启动 {server_name} 服务器..."
+echo "Java: $JAVA_EXEC"
+echo "服务端: $SERVER_JAR"
+echo "JVM参数: $JVM_ARGS"
+echo ""
+
+"$JAVA_EXEC" $JVM_ARGS -jar "$SERVER_JAR" nogui
+"""
+        
+        # 写入启动脚本
+        script_path = os.path.join(game_dir, "start.sh")
+        with open(script_path, 'w', encoding='utf-8') as f:
+            f.write(script_content)
+            
+        # 设置执行权限
+        os.chmod(script_path, 0o755)
+        
+        logger.info(f"Java启动脚本已生成: {script_path}")
+        return "start.sh"
+        
+    except Exception as e:
+        logger.error(f"生成Java启动脚本失败: {str(e)}")
+        return None
+
 @app.route('/api/upload', methods=['POST'])
 def upload_file():
     """上传文件"""
