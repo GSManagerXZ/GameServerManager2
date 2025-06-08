@@ -28,6 +28,13 @@ const { Title, Paragraph } = Typography;
 const { TabPane } = Tabs;
 const { Option } = Select;
 
+// 扩展window对象类型
+declare global {
+  interface Window {
+    currentProgressHide?: () => void;
+  }
+}
+
 // 定义一个类型化的错误处理函数
 const handleError = (err: any): void => {
   // console.error('Error:', err);
@@ -520,14 +527,14 @@ const MinecraftDeploy: React.FC = () => {
 
         {selectedBuild && (
           <Col span={24}>
-            <Title level={4}>服务器名称</Title>
+            <Title level={4} style={{ padding: '50px' }}>服务器名称</Title>
             <Input
               placeholder="请输入服务器名称（将作为目录名）"
               value={customName}
               onChange={(e) => setCustomName(e.target.value)}
             />
             <div style={{ marginTop: '8px', color: '#666', fontSize: '12px' }}>
-              服务器将部署到: /home/games/{customName || '服务器名称'}
+              服务器将部署到: /home/steam/games/{customName || '服务器名称'}
             </div>
           </Col>
         )}
@@ -684,6 +691,9 @@ const SemiAutoDeploy: React.FC = () => {
         formData.append('jdk_version', selectedJdk);
       }
       
+      // 显示上传开始消息
+      const hideLoading = message.loading('准备上传...', 0);
+      
       // 上传文件并部署
       const response = await axios.post('/api/semi-auto-deploy', formData, {
         headers: {
@@ -691,11 +701,22 @@ const SemiAutoDeploy: React.FC = () => {
         },
         onUploadProgress: (progressEvent) => {
           const percentCompleted = Math.round((progressEvent.loaded * 100) / (progressEvent.total || 1));
-          message.loading(`上传中... ${percentCompleted}%`, 0);
+          hideLoading();
+          const hideProgress = message.loading(`上传中... ${percentCompleted}%`, 0);
+          // 保存当前进度消息的隐藏函数，以便下次更新时清除
+          if (window.currentProgressHide) {
+            window.currentProgressHide();
+          }
+          window.currentProgressHide = hideProgress;
         }
       });
       
-      message.destroy(); // 清除上传进度消息
+      // 清除所有上传相关消息
+      if (window.currentProgressHide) {
+        window.currentProgressHide();
+        window.currentProgressHide = null;
+      }
+      message.destroy();
       
       if (response.data.status === 'success') {
         message.success('服务器部署成功!');
@@ -765,7 +786,7 @@ const SemiAutoDeploy: React.FC = () => {
         {uploadFile && (
           <>
             <Col span={24}>
-              <Title level={4}>服务器名称</Title>
+              <Title level={4} style={{ padding: '70px' }}>服务器名称</Title>
               <Input
                 placeholder="请输入服务器名称（将作为目录名）"
                 value={serverName}
