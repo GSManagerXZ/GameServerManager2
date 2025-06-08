@@ -18,6 +18,7 @@ import Environment from './pages/Environment'; // 导入环境安装页面
 import ServerGuide from './pages/ServerGuide'; // 导入开服指南页面
 import { fetchGames, installGame, terminateInstall, installByAppId, openGameFolder, checkVersionUpdate } from './api';
 import { GameInfo } from './types';
+import terminalService from './services/terminalService';
 import { useAuth } from './context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useIsMobile } from './hooks/useIsMobile'; // 导入移动设备检测钩子
@@ -223,11 +224,16 @@ const stopServer = async (gameId: string, force: boolean = false) => {
     const loadingKey = `stopping_${gameId}`;
     message.loading({ content: `正在${force ? '强制' : ''}停止服务器...`, key: loadingKey, duration: 0 });
     
-    // 发送停止请求
-    const response = await axios.post('/api/server/stop', { 
-      game_id: gameId,
-      force
-    });
+    // 使用terminalService的terminate方法
+    const success = await terminalService.terminateProcess('server', gameId, force);
+    
+    if (!success) {
+      message.error({ content: '停止服务器失败', key: loadingKey });
+      return { status: 'error', message: '停止服务器失败' };
+    }
+    
+    // 模拟原来的响应格式
+    const response = { data: { status: 'success' } };
     
     // 如果成功或警告，验证服务器是否真的停止了
     if (response.data.status === 'success' || response.data.status === 'warning') {
