@@ -6014,6 +6014,414 @@ def get_gold_sponsors():
         logger.error(f"获取金牌赞助商数据时出错: {str(e)}")
         return jsonify({'status': 'error', 'message': f'获取数据失败: {str(e)}'}), 500
 
+@app.route('/api/sponsor/validate', methods=['GET'])
+@auth_required
+def validate_sponsor():
+    """验证赞助者身份"""
+    try:
+        # 使用赞助者验证模块验证身份
+        validator = get_sponsor_validator()
+        
+        # 检查是否有赞助者密钥
+        if not validator.has_sponsor_key():
+            return jsonify({
+                'status': 'success',
+                'valid': False,
+                'message': '未配置赞助者密钥'
+            })
+        
+        # 验证赞助者密钥
+        is_valid = validator.validate_sponsor_key()
+        
+        if is_valid:
+            return jsonify({
+                'status': 'success',
+                'valid': True,
+                'message': '赞助者身份验证成功'
+            })
+        else:
+            return jsonify({
+                'status': 'success',
+                'valid': False,
+                'message': '赞助者身份验证失败'
+            })
+            
+    except Exception as e:
+        logger.error(f"验证赞助者身份时出错: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'valid': False,
+            'message': f'验证失败: {str(e)}'
+        }), 500
+
+@app.route('/api/online-games', methods=['GET'])
+@auth_required
+def get_online_games():
+    """获取在线游戏列表"""
+    try:
+        validator = get_sponsor_validator()
+        
+        # 验证赞助者身份
+        if not validator.has_sponsor_key() or not validator.validate_sponsor_key():
+            return jsonify({
+                'status': 'error',
+                'message': '需要赞助者权限'
+            }), 403
+        
+        # 获取赞助者密钥
+        sponsor_key = validator.get_sponsor_key()
+        if not sponsor_key:
+            return jsonify({
+                'status': 'error',
+                'message': '未找到赞助者密钥'
+            }), 403
+        
+        # 请求在线游戏列表
+        import requests
+        headers = {'key': sponsor_key}
+        response = requests.get('http://82.156.35.55:5001/OnlineInstall', headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            games_data = response.json()
+            return jsonify({
+                'status': 'success',
+                'games': games_data
+            }), 200
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': f'获取在线游戏列表失败: HTTP {response.status_code}'
+            }), 500
+            
+    except requests.exceptions.RequestException as e:
+        logger.error(f"请求在线游戏列表失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'网络请求失败: {str(e)}'
+        }), 500
+    except Exception as e:
+        logger.error(f"获取在线游戏列表时发生错误: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'获取游戏列表时发生错误: {str(e)}'
+        }), 500
+
+# 在线部署相关的全局变量
+active_online_deployments = {}  # game_id -> deployment_data
+online_deploy_queues = {}  # game_id -> queue
+
+@app.route('/api/online-deploy', methods=['POST'])
+@auth_required
+def deploy_online_game():
+    """启动在线游戏部署"""
+    try:
+        validator = get_sponsor_validator()
+        
+        # 验证赞助者身份
+        if not validator.has_sponsor_key() or not validator.validate_sponsor_key():
+            return jsonify({
+                'status': 'error',
+                'message': '需要赞助者权限'
+            }), 403
+        
+        data = request.get_json()
+        game_id = data.get('gameId')
+        game_name = data.get('gameName')
+        download_url = data.get('downloadUrl')
+        script_content = data.get('script')
+        
+        if not all([game_id, game_name, download_url, script_content]):
+            return jsonify({
+                'status': 'error',
+                'message': '缺少必要参数'
+            }), 400
+        
+        # 检查是否已有部署在进行
+        if game_id in active_online_deployments:
+            return jsonify({
+                'status': 'error',
+                'message': f'游戏 {game_name} 正在部署中，请等待完成'
+            }), 409
+        
+        # 初始化部署状态
+        active_online_deployments[game_id] = {
+            'game_name': game_name,
+            'download_url': download_url,
+            'script_content': script_content,
+            'status': 'starting',
+            'progress': 0,
+            'message': '正在准备部署...',
+            'complete': False,
+            'start_time': time.time()
+        }
+        
+        online_deploy_queues[game_id] = queue.Queue()
+        
+        # 启动部署线程
+        deploy_thread = threading.Thread(
+            target=_deploy_online_game_worker,
+            args=(game_id, game_name, download_url, script_content),
+            daemon=True
+        )
+        deploy_thread.start()
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'开始部署游戏 {game_name}',
+            'game_id': game_id
+        }), 200
+        
+        
+    except Exception as e:
+        logger.error(f"启动在线游戏部署时发生错误: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'启动部署时发生错误: {str(e)}'
+        }), 500
+
+def _deploy_online_game_worker(game_id, game_name, download_url, script_content):
+    """在线游戏部署工作线程"""
+    import requests
+    import zipfile
+    import tempfile
+    import shutil
+    
+    try:
+        deploy_queue = online_deploy_queues[game_id]
+        deployment_data = active_online_deployments[game_id]
+        
+        # 创建游戏目录
+        games_dir = '/home/steam/games'
+        game_dir = os.path.join(games_dir, game_name)
+        
+        # 确保games目录存在
+        os.makedirs(games_dir, exist_ok=True)
+        
+        # 阶段1: 准备目录
+        deployment_data['status'] = 'preparing'
+        deployment_data['progress'] = 5
+        deployment_data['message'] = '正在准备部署目录...'
+        deploy_queue.put({'progress': 5, 'status': 'preparing', 'message': '正在准备部署目录...'})
+        
+        # 如果游戏目录已存在，先删除
+        if os.path.exists(game_dir):
+            shutil.rmtree(game_dir)
+        
+        # 创建新的游戏目录
+        os.makedirs(game_dir, exist_ok=True)
+        
+        # 阶段2: 下载文件
+        deployment_data['status'] = 'downloading'
+        deployment_data['progress'] = 10
+        deployment_data['message'] = '正在下载游戏文件...'
+        deploy_queue.put({'progress': 10, 'status': 'downloading', 'message': '正在下载游戏文件...'})
+        
+        logger.info(f"开始下载游戏 {game_name} 的服务端文件...")
+        response = requests.get(download_url, stream=True, timeout=300)
+        response.raise_for_status()
+        
+        total_size = int(response.headers.get('content-length', 0))
+        downloaded_size = 0
+        
+        # 创建临时文件保存下载的压缩包
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as temp_file:
+            for chunk in response.iter_content(chunk_size=8192):
+                temp_file.write(chunk)
+                downloaded_size += len(chunk)
+                
+                # 更新下载进度 (10% - 60%)
+                if total_size > 0:
+                    download_progress = int(min(60, 10 + (downloaded_size / total_size) * 50))
+                    deployment_data['progress'] = download_progress
+                    deploy_queue.put({
+                        'progress': download_progress, 
+                        'status': 'downloading', 
+                        'message': f'正在下载游戏文件... ({downloaded_size // 1024 // 1024}MB/{total_size // 1024 // 1024}MB)'
+                    })
+            temp_zip_path = temp_file.name
+        
+        try:
+            # 阶段3: 解压文件
+            deployment_data['status'] = 'extracting'
+            deployment_data['progress'] = 70
+            deployment_data['message'] = '正在解压游戏文件...'
+            deploy_queue.put({'progress': 70, 'status': 'extracting', 'message': '正在解压游戏文件...'})
+            
+            logger.info(f"正在解压到 {game_dir}...")
+            with zipfile.ZipFile(temp_zip_path, 'r') as zip_ref:
+                zip_ref.extractall(game_dir)
+            
+            # 阶段4: 创建启动脚本
+            deployment_data['status'] = 'creating_script'
+            deployment_data['progress'] = 90
+            deployment_data['message'] = '正在创建启动脚本...'
+            deploy_queue.put({'progress': 90, 'status': 'creating_script', 'message': '正在创建启动脚本...'})
+            
+            start_script_path = os.path.join(game_dir, 'start.sh')
+            with open(start_script_path, 'w', encoding='utf-8') as f:
+                f.write(script_content)
+            
+            # 给启动脚本添加执行权限
+            os.chmod(start_script_path, 0o755)
+            
+            # 阶段5: 完成部署
+            deployment_data['status'] = 'completed'
+            deployment_data['progress'] = 100
+            deployment_data['message'] = f'游戏 {game_name} 部署成功'
+            deployment_data['complete'] = True
+            deployment_data['game_dir'] = game_dir
+            
+            deploy_queue.put({
+                'progress': 100, 
+                'status': 'completed', 
+                'message': f'游戏 {game_name} 部署成功',
+                'complete': True,
+                'game_dir': game_dir
+            })
+            
+            logger.info(f"游戏 {game_name} 部署成功")
+            
+        finally:
+            # 清理临时文件
+            if os.path.exists(temp_zip_path):
+                os.unlink(temp_zip_path)
+                
+    except requests.exceptions.RequestException as e:
+        error_msg = f'下载游戏文件失败: {str(e)}'
+        logger.error(error_msg)
+        deployment_data['status'] = 'error'
+        deployment_data['message'] = error_msg
+        deployment_data['complete'] = True
+        deploy_queue.put({'progress': deployment_data['progress'], 'status': 'error', 'message': error_msg, 'complete': True})
+        
+    except zipfile.BadZipFile as e:
+        error_msg = '下载的文件不是有效的ZIP压缩包'
+        logger.error(f"解压文件失败: {str(e)}")
+        deployment_data['status'] = 'error'
+        deployment_data['message'] = error_msg
+        deployment_data['complete'] = True
+        deploy_queue.put({'progress': deployment_data['progress'], 'status': 'error', 'message': error_msg, 'complete': True})
+        
+    except Exception as e:
+        error_msg = f'部署时发生错误: {str(e)}'
+        logger.error(f"部署在线游戏时发生错误: {str(e)}")
+        deployment_data['status'] = 'error'
+        deployment_data['message'] = error_msg
+        deployment_data['complete'] = True
+        deploy_queue.put({'progress': deployment_data['progress'], 'status': 'error', 'message': error_msg, 'complete': True})
+
+@app.route('/api/online-deploy/stream', methods=['GET'])
+@auth_required
+def online_deploy_stream():
+    """获取在线部署的实时进度"""
+    try:
+        game_id = request.args.get('game_id')
+        
+        if not game_id:
+            return jsonify({'status': 'error', 'message': '缺少游戏ID'}), 400
+        
+        validator = get_sponsor_validator()
+        
+        # 验证赞助者身份
+        if not validator.has_sponsor_key() or not validator.validate_sponsor_key():
+            return jsonify({
+                'status': 'error',
+                'message': '需要赞助者权限'
+            }), 403
+        
+        # 检查部署是否存在
+        if game_id not in active_online_deployments:
+            return jsonify({
+                'status': 'error',
+                'message': f'游戏 {game_id} 没有活跃的部署任务'
+            }), 404
+        
+        # 确保有队列
+        if game_id not in online_deploy_queues:
+            online_deploy_queues[game_id] = queue.Queue()
+            
+            # 如果部署已完成，添加完成消息
+            deployment_data = active_online_deployments[game_id]
+            if deployment_data.get('complete', False):
+                online_deploy_queues[game_id].put({
+                    'progress': deployment_data.get('progress', 100),
+                    'status': deployment_data.get('status', 'completed'),
+                    'message': deployment_data.get('message', '部署已完成'),
+                    'complete': True,
+                    'game_dir': deployment_data.get('game_dir')
+                })
+        
+        def generate():
+            deployment_data = active_online_deployments[game_id]
+            deploy_queue = online_deploy_queues[game_id]
+            
+            # 发送连接成功消息
+            yield f"data: {json.dumps({'message': '连接成功，开始接收部署进度...', 'progress': deployment_data.get('progress', 0), 'status': deployment_data.get('status', 'starting')})}\n\n"
+            
+            # 超时设置
+            timeout_seconds = 600  # 10分钟超时
+            last_output_time = time.time()
+            heartbeat_interval = 10  # 每10秒发送一次心跳
+            next_heartbeat = time.time() + heartbeat_interval
+            
+            while True:
+                try:
+                    # 尝试获取队列中的数据
+                    try:
+                        item = deploy_queue.get(timeout=1)
+                        last_output_time = time.time()
+                        
+                        # 发送进度更新
+                        yield f"data: {json.dumps(item)}\n\n"
+                        
+                        # 如果部署完成，结束流
+                        if item.get('complete', False):
+                            break
+                            
+                    except queue.Empty:
+                        # 心跳检查
+                        current_time = time.time()
+                        if current_time >= next_heartbeat:
+                            yield f"data: {json.dumps({'heartbeat': True, 'timestamp': current_time})}\n\n"
+                            next_heartbeat = current_time + heartbeat_interval
+                        
+                        # 检查是否超时
+                        if time.time() - last_output_time > timeout_seconds:
+                            logger.warning(f"游戏 {game_id} 的部署流超时")
+                            yield f"data: {json.dumps({'message': '部署流超时，请刷新页面查看最新状态', 'status': 'timeout', 'complete': True})}\n\n"
+                            break
+                        
+                        # 检查部署是否已完成但未发送完成消息
+                        if deployment_data.get('complete', False):
+                            final_data = {
+                                'progress': deployment_data.get('progress', 100),
+                                'status': deployment_data.get('status', 'completed'),
+                                'message': deployment_data.get('message', '部署已完成'),
+                                'complete': True
+                            }
+                            if deployment_data.get('game_dir'):
+                                final_data['game_dir'] = deployment_data['game_dir']
+                            yield f"data: {json.dumps(final_data)}\n\n"
+                            break
+                        
+                        continue
+                        
+                except Exception as e:
+                    logger.error(f"生成部署流数据时出错: {str(e)}")
+                    yield f"data: {json.dumps({'error': str(e), 'complete': True})}\n\n"
+                    break
+        
+        return Response(stream_with_context(generate()),
+                       mimetype='text/event-stream',
+                       headers={
+                           'Cache-Control': 'no-cache',
+                           'X-Accel-Buffering': 'no'
+                       })
+                       
+    except Exception as e:
+        logger.error(f"在线部署流处理错误: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 @app.route('/api/settings/proxy', methods=['POST'])
 @auth_required
 def save_proxy_config():

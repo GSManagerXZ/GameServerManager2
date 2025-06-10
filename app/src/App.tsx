@@ -12,6 +12,7 @@ import FileManager from './components/FileManager';
 import Register from './components/Register'; // 导入注册组件
 import FrpManager from './components/FrpManager'; // 导入内网穿透组件
 import FrpDocModal from './components/FrpDocModal'; // 导入内网穿透文档弹窗组件
+import OnlineDeploy from './components/OnlineDeploy'; // 导入在线部署组件
 import About from './pages/About'; // 导入关于项目页面
 import Settings from './pages/Settings'; // 导入设置页面
 import Environment from './pages/Environment'; // 导入环境安装页面
@@ -3462,6 +3463,11 @@ const App: React.FC = () => {
                     <Card title="半自动部署">
                       <SemiAutoDeploy />
                     </Card>
+                  </div>
+                </TabPane>
+                <TabPane tab="在线部署" key="online-deploy">
+                  <div style={{ maxWidth: 1000, margin: '0 auto', padding: '20px 0' }}>
+                    <OnlineDeploy />
                   </div>
                 </TabPane>
               </Tabs>
