@@ -464,7 +464,9 @@ const Settings: React.FC = () => {
         <InfoCircleOutlined /> 赞助者权益:
         <ul>
           <li>从云端获取更多可部署的游戏列表及最新的游戏启动脚本</li>
+          <li>国内服务器高速下载Java运行环境</li>
           <li>版本更新提示功能</li>
+          <li>享受星辰资源站的高速下载特权</li>
         </ul>
       </Paragraph>
       

@@ -245,7 +245,7 @@ const Environment: React.FC = () => {
         <TabPane tab="Java环境" key="java">
           <Card title="Java环境安装" bordered={false}>
             <Paragraph>
-              许多游戏服务器（如Minecraft）需要Java环境才能运行。请选择需要安装的Java版本。
+              许多游戏服务器（如Minecraft）需要Java环境才能运行。请选择需要安装的Java版本。由于国内网络环境的限制，默认下载源速度不稳定，推荐您赞助项目畅享国内服务器提供高速下载特权。
             </Paragraph>
             
             <List

@@ -42,6 +42,7 @@ import requests
 from pty_manager import pty_manager
 # 导入MC下载功能
 from MCdownloads import get_server_list, get_server_info, get_builds, get_core_info, download_file
+from sponsor_validator import SponsorValidator
 
 # 输出管理函数
 def add_server_output(game_id, message, max_lines=500):
@@ -6897,26 +6898,31 @@ JAVA_VERSIONS = {
     "jdk8": {
         "dir": JAVA_JDK8_DIR,
         "url": JAVA_JDK8_URL,
+        "sponsor_url": "http://download.server.xiaozhuhouses.asia:8082/disk1/jdk/Linux/openjdk-8u44-linux-x64.tar.gz",
         "display_name": "JDK 8"
     },
     "jdk12": {
         "dir": JAVA_JDK12_DIR,
         "url": JAVA_JDK12_URL,
+        "sponsor_url": "http://download.server.xiaozhuhouses.asia:8082/disk1/jdk/Linux/openjdk-12+32_linux-x64_bin.tar.gz",
         "display_name": "JDK 12"
     },
     "jdk17": {
         "dir": JAVA_JDK17_DIR,
         "url": JAVA_JDK17_URL,
+        "sponsor_url": "http://download.server.xiaozhuhouses.asia:8082/disk1/jdk/Linux/openjdk-17.0.0.1+2_linux-x64_bin.tar.gz",
         "display_name": "JDK 17"
     },
     "jdk21": {
         "dir": JAVA_JDK21_DIR,
         "url": JAVA_JDK21_URL,
+        "sponsor_url": "http://download.server.xiaozhuhouses.asia:8082/disk1/jdk/Linux/openjdk-21+35_linux-x64_bin.tar.gz",
         "display_name": "JDK 21"
     },
     "jdk24": {
         "dir": JAVA_JDK24_DIR,
         "url": JAVA_JDK24_URL,
+        "sponsor_url": "http://download.server.xiaozhuhouses.asia:8082/disk1/jdk/Linux/openjdk-24+36_linux-x64_bin.tar.gz",
         "display_name": "JDK 24"
     }
 }
@@ -6927,6 +6933,82 @@ os.makedirs(JAVA_DIR, exist_ok=True)
 
 # 环境安装进度跟踪
 environment_install_progress = {}
+
+# Java下载并发控制
+java_download_lock = threading.Lock()
+current_java_download = None
+
+# 初始化赞助者验证器
+sponsor_validator = SponsorValidator()
+
+def verify_sponsor_for_java() -> tuple[bool, str]:
+    """验证赞助者身份用于Java下载
+    
+    Returns:
+        tuple: (是否为赞助者, 验证信息)
+    """
+    try:
+        # 从配置文件中读取sponsor_key
+        config_path = "/home/steam/games/config.json"
+        sponsor_key = None
+        
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    sponsor_key = config.get('sponsor_key')
+            except Exception as e:
+                logger.warning(f"读取配置文件失败: {str(e)}")
+        
+        if not sponsor_key:
+            logger.info("未找到赞助者密钥，将使用普通下载链接")
+            return False, "未找到赞助者密钥"
+        
+        # 验证赞助者密钥
+        url = "http://82.156.35.55:5001/verify"
+        headers = {
+            'key': sponsor_key,
+            'User-Agent': 'Apifox/1.0.0 (https://apifox.com)',
+            'Accept': '*/*',
+            'Host': '82.156.35.55:5001',
+            'Connection': 'keep-alive'
+        }
+        
+        logger.info(f"🔐 开始验证赞助者身份")
+        logger.info(f"📡 验证接口: {url}")
+        logger.info(f"🔑 使用密钥: {sponsor_key[:8]}...{sponsor_key[-4:] if len(sponsor_key) > 12 else sponsor_key}")
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        logger.info(f"📊 验证接口响应状态码: {response.status_code}")
+        logger.info(f"📄 验证接口返回内容: {response.text.strip()}")
+        
+        if response.status_code == 200:
+            try:
+                result = response.json()
+                is_sponsor = result.get('is_sponsor', False)
+                if is_sponsor:
+                    logger.info("✅ 赞助者验证成功，将使用专用下载链接")
+                    return True, "赞助者验证成功"
+                else:
+                    logger.info("❌ 非赞助者用户，将使用普通下载链接")
+                    return False, "非赞助者用户"
+            except json.JSONDecodeError:
+                # 如果不是JSON格式，回退到原来的文本检查方式
+                result = response.text.strip()
+                if "success" in result.lower() or "valid" in result.lower():
+                    logger.info("✅ 赞助者验证成功，将使用专用下载链接")
+                    return True, "赞助者验证成功"
+                else:
+                    logger.info("❌ 非赞助者用户，将使用普通下载链接")
+                    return False, "非赞助者用户"
+        else:
+            logger.warning(f"⚠️ 赞助者验证失败，状态码: {response.status_code}，将使用普通下载链接")
+            return False, f"验证服务器返回状态码: {response.status_code}"
+            
+    except Exception as e:
+        logger.warning(f"赞助者验证出错: {str(e)}，将使用普通下载链接")
+        return False, f"验证出错: {str(e)}"
 
 # 检查Java是否已安装
 def check_java_installation(version="jdk8"):
@@ -6963,8 +7045,19 @@ def check_java_installation(version="jdk8"):
 # 安装Java的函数
 def install_java(version="jdk8"):
     """安装指定版本的Java"""
+    global current_java_download
+    
     if version not in JAVA_VERSIONS:
         return False, f"不支持的Java版本: {version}，支持的版本有: {', '.join(JAVA_VERSIONS.keys())}"
+    
+    # 检查是否有其他Java正在下载
+    with java_download_lock:
+        if current_java_download is not None:
+            current_downloading = JAVA_VERSIONS.get(current_java_download, {}).get('display_name', current_java_download)
+            return False, f"当前正在下载 {current_downloading}，请等待完成后再下载其他版本"
+        
+        # 设置当前下载的版本
+        current_java_download = version
     
     # 初始化进度
     environment_install_progress[version] = {
@@ -6983,12 +7076,34 @@ def install_java(version="jdk8"):
 
 def _install_java_thread(version="jdk8"):
     """在后台线程中安装Java"""
+    global current_java_download
+    
     try:
         if version not in JAVA_VERSIONS:
             raise ValueError(f"不支持的Java版本: {version}")
         
         java_dir = JAVA_VERSIONS[version]["dir"]
-        java_url = JAVA_VERSIONS[version]["url"]
+        
+        # 验证赞助者身份
+        environment_install_progress[version]["status"] = "verifying_sponsor"
+        environment_install_progress[version]["progress"] = 2
+        
+        is_sponsor, verify_msg = verify_sponsor_for_java()
+        
+        # 根据赞助者身份选择下载链接
+        if is_sponsor and "sponsor_url" in JAVA_VERSIONS[version]:
+            java_url = JAVA_VERSIONS[version]["sponsor_url"]
+            logger.info(f"✅ 赞助者验证通过！使用专用高速下载链接")
+            logger.info(f"📥 赞助者下载地址: {java_url}")
+            environment_install_progress[version]["download_source"] = "sponsor"
+        else:
+            java_url = JAVA_VERSIONS[version]["url"]
+            logger.info(f"ℹ️ 使用普通下载链接")
+            logger.info(f"📥 普通下载地址: {java_url}")
+            environment_install_progress[version]["download_source"] = "public"
+        
+        environment_install_progress[version]["verify_result"] = verify_msg
+        logger.info(f"🔍 验证结果: {verify_msg}")
         
         # 下载JDK
         environment_install_progress[version]["status"] = "downloading"
@@ -6999,7 +7114,9 @@ def _install_java_thread(version="jdk8"):
         temp_file = os.path.join(temp_dir, f"{version}.tar.gz")
         
         # 下载文件
-        logger.info(f"开始下载{JAVA_VERSIONS[version]['display_name']}: {java_url}")
+        download_source_text = "赞助者专用链接" if is_sponsor else "普通链接"
+        logger.info(f"🚀 开始下载 {JAVA_VERSIONS[version]['display_name']} (通过{download_source_text})")
+        logger.info(f"📂 下载地址: {java_url}")
         response = requests.get(java_url, stream=True)
         response.raise_for_status()
         
@@ -7100,7 +7217,15 @@ def _install_java_thread(version="jdk8"):
             environment_install_progress[version]["version"] = java_version
             environment_install_progress[version]["path"] = java_executable
             environment_install_progress[version]["usage_hint"] = f"使用方式: {java_executable} -version"
-            logger.info(f"{JAVA_VERSIONS[version]['display_name']}安装成功，版本: {java_version}")
+            
+            # 获取下载源信息用于日志
+            download_source = environment_install_progress[version].get("download_source", "unknown")
+            download_source_text = "赞助者专用链接" if download_source == "sponsor" else "普通链接"
+            
+            logger.info(f"{JAVA_VERSIONS[version]['display_name']} 安装成功！")
+            logger.info(f"Java版本: {java_version}")
+            logger.info(f"安装路径: {java_executable}")
+            logger.info(f"下载方式: 通过{download_source_text}下载")
         else:
             raise Exception("Java安装后无法执行")
         
@@ -7112,6 +7237,10 @@ def _install_java_thread(version="jdk8"):
         environment_install_progress[version]["status"] = "error"
         environment_install_progress[version]["error"] = str(e)
         environment_install_progress[version]["completed"] = True
+    finally:
+        # 无论成功还是失败，都要清除当前下载标记
+        with java_download_lock:
+            current_java_download = None
 
 # Java环境API路由
 @app.route('/api/environment/java/status', methods=['GET'])
