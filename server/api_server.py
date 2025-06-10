@@ -6940,6 +6940,7 @@ environment_install_progress = {}
 # Java下载并发控制
 java_download_lock = threading.Lock()
 current_java_download = None
+java_download_cancelled = {}  # 存储取消下载的标志 {version: True/False}
 
 # 初始化赞助者验证器
 sponsor_validator = SponsorValidator()
@@ -7060,13 +7061,14 @@ def install_java(version="jdk8"):
         # 设置当前下载的版本
         current_java_download = version
     
-    # 初始化进度
+    # 初始化进度和取消标志
     environment_install_progress[version] = {
         "progress": 0,
         "status": "downloading",
         "completed": False,
         "error": None
     }
+    java_download_cancelled[version] = False
     
     # 在新线程中执行安装
     thread = threading.Thread(target=_install_java_thread, args=(version,))
@@ -7123,6 +7125,14 @@ def _install_java_thread(version="jdk8"):
         # 写入文件
         with open(temp_file, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
+                # 检查是否被取消
+                if java_download_cancelled.get(version, False):
+                    logger.info(f"{JAVA_VERSIONS[version]['display_name']} 下载已被取消")
+                    environment_install_progress[version]["status"] = "cancelled"
+                    environment_install_progress[version]["error"] = "下载已被用户取消"
+                    environment_install_progress[version]["completed"] = True
+                    return
+                
                 if chunk:
                     f.write(chunk)
                     downloaded += len(chunk)
@@ -7150,6 +7160,14 @@ def _install_java_thread(version="jdk8"):
             
             # 解压所有文件
             for i, member in enumerate(tar.getmembers()):
+                # 检查是否被取消
+                if java_download_cancelled.get(version, False):
+                    logger.info(f"{JAVA_VERSIONS[version]['display_name']} 解压已被取消")
+                    environment_install_progress[version]["status"] = "cancelled"
+                    environment_install_progress[version]["error"] = "解压已被用户取消"
+                    environment_install_progress[version]["completed"] = True
+                    return
+                
                 tar.extract(member, temp_dir)
                 # 更新解压进度
                 progress = int(40 * i / len(tar.getmembers())) + 30  # 30-70%
@@ -7227,8 +7245,7 @@ def _install_java_thread(version="jdk8"):
         else:
             raise Exception("Java安装后无法执行")
         
-        # 清理临时文件
-        shutil.rmtree(temp_dir)
+        # 临时文件将在finally块中清理
         
     except Exception as e:
         logger.error(f"安装Java时出错: {str(e)}")
@@ -7236,9 +7253,17 @@ def _install_java_thread(version="jdk8"):
         environment_install_progress[version]["error"] = str(e)
         environment_install_progress[version]["completed"] = True
     finally:
-        # 无论成功还是失败，都要清除当前下载标记
+        # 无论成功还是失败，都要清除当前下载标记和取消标志
         with java_download_lock:
             current_java_download = None
+        # 清理取消标志
+        java_download_cancelled.pop(version, None)
+        # 清理临时文件
+        try:
+            if 'temp_dir' in locals() and os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
+        except Exception as e:
+            logger.warning(f"清理临时文件失败: {str(e)}")
 
 # Java环境API路由
 @app.route('/api/environment/java/status', methods=['GET'])
@@ -7391,6 +7416,39 @@ def uninstall_java_route():
             }), 400
     except Exception as e:
         logger.error(f"卸载Java时出错: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+@app.route('/api/environment/java/cancel', methods=['POST'])
+@auth_required
+def cancel_java_download():
+    """取消Java下载"""
+    try:
+        data = request.get_json()
+        version = data.get('version', 'jdk8')
+        
+        # 检查是否有正在下载的Java
+        with java_download_lock:
+            if current_java_download != version:
+                return jsonify({
+                    "status": "error",
+                    "message": f"{JAVA_VERSIONS.get(version, {}).get('display_name', version)}当前没有在下载"
+                }), 400
+        
+        # 设置取消标志
+        java_download_cancelled[version] = True
+        
+        logger.info(f"用户请求取消{JAVA_VERSIONS.get(version, {}).get('display_name', version)}下载")
+        
+        return jsonify({
+            "status": "success",
+            "message": f"{JAVA_VERSIONS.get(version, {}).get('display_name', version)}下载取消请求已发送"
+        })
+        
+    except Exception as e:
+        logger.error(f"取消Java下载时出错: {str(e)}")
         return jsonify({
             "status": "error",
             "message": str(e)
