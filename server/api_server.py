@@ -6185,8 +6185,16 @@ def _deploy_online_game_worker(game_id, game_name, download_url, script_content)
     import zipfile
     import tempfile
     import shutil
+    import time
     
     try:
+        # 降低当前线程的优先级，避免影响游戏服务器性能
+        try:
+            import os
+            # 设置进程为低优先级（仅在Linux系统上有效）
+            os.nice(10)  # 增加nice值，降低优先级
+        except (ImportError, OSError):
+            pass  # 如果设置失败，继续执行
         deploy_queue = online_deploy_queues[game_id]
         deployment_data = active_online_deployments[game_id]
         
@@ -6217,7 +6225,13 @@ def _deploy_online_game_worker(game_id, game_name, download_url, script_content)
         deploy_queue.put({'progress': 10, 'status': 'downloading', 'message': '正在下载游戏文件...'})
         
         logger.info(f"开始下载游戏 {game_name} 的服务端文件...")
-        response = requests.get(download_url, stream=True, timeout=300)
+        # 优化请求配置以提升下载速度
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'GSManager/1.0',
+            'Accept-Encoding': 'gzip, deflate'
+        })
+        response = session.get(download_url, stream=True, timeout=600)  # 增加超时时间
         response.raise_for_status()
         
         total_size = int(response.headers.get('content-length', 0))
@@ -6225,9 +6239,16 @@ def _deploy_online_game_worker(game_id, game_name, download_url, script_content)
         
         # 创建临时文件保存下载的压缩包
         with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as temp_file:
-            for chunk in response.iter_content(chunk_size=8192):
+            chunk_count = 0
+            # 使用更大的chunk大小提升下载速度
+            for chunk in response.iter_content(chunk_size=65536):  # 64KB chunk
                 temp_file.write(chunk)
                 downloaded_size += len(chunk)
+                chunk_count += 1
+                
+                # 减少休息频率，每处理500个chunk后短暂休息
+                if chunk_count % 500 == 0:
+                    time.sleep(0.005)  # 休息5毫秒
                 
                 # 更新下载进度 (10% - 60%)
                 if total_size > 0:
@@ -6249,7 +6270,26 @@ def _deploy_online_game_worker(game_id, game_name, download_url, script_content)
             
             logger.info(f"正在解压到 {game_dir}...")
             with zipfile.ZipFile(temp_zip_path, 'r') as zip_ref:
-                zip_ref.extractall(game_dir)
+                # 获取压缩包中的文件列表
+                file_list = zip_ref.namelist()
+                total_files = len(file_list)
+                
+                # 逐个解压文件，避免一次性占用过多资源
+                for i, file_info in enumerate(file_list):
+                    zip_ref.extract(file_info, game_dir)
+                    
+                    # 减少休息频率，每解压50个文件后短暂休息
+                    if i % 50 == 0:
+                        time.sleep(0.002)  # 休息2毫秒
+                        
+                        # 更新解压进度
+                        extract_progress = int(70 + (i / total_files) * 20)  # 70%-90%
+                        deployment_data['progress'] = extract_progress
+                        deploy_queue.put({
+                            'progress': extract_progress,
+                            'status': 'extracting',
+                            'message': f'正在解压游戏文件... ({i+1}/{total_files})'
+                        })
             
             # 阶段4: 创建启动脚本
             deployment_data['status'] = 'creating_script'
