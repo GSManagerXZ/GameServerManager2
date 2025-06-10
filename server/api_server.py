@@ -131,6 +131,7 @@ def ensure_auto_start_initialized():
     
     # 如果已经初始化过，直接返回，避免重复执行
     if _auto_start_initialized:
+        logger.debug("自启动功能已初始化，跳过重复执行")
         return
         
     # 如果有服务器正在运行，说明已经初始化过了，避免重复执行
@@ -143,6 +144,8 @@ def ensure_auto_start_initialized():
         auto_start_servers()
         # 打印当前运行的游戏服务器信息
         log_running_games()
+        _auto_start_initialized = True
+        logger.info("自启动功能初始化完成")
     except Exception as e:
         logger.error(f"初始化自启动功能时出错: {str(e)}")
 
@@ -6974,33 +6977,31 @@ def verify_sponsor_for_java() -> tuple[bool, str]:
             'Connection': 'keep-alive'
         }
         
-        logger.info(f"🔐 开始验证赞助者身份")
-        logger.info(f"📡 验证接口: {url}")
-        logger.info(f"🔑 使用密钥: {sponsor_key[:8]}...{sponsor_key[-4:] if len(sponsor_key) > 12 else sponsor_key}")
+        logger.debug(f"开始验证赞助者身份")
+        logger.debug(f"验证接口: {url}")
+        logger.debug(f"使用密钥: {sponsor_key[:8]}...{sponsor_key[-4:] if len(sponsor_key) > 12 else sponsor_key}")
         
         response = requests.get(url, headers=headers, timeout=10)
         
-        logger.info(f"📊 验证接口响应状态码: {response.status_code}")
-        logger.info(f"📄 验证接口返回内容: {response.text.strip()}")
+        logger.debug(f"验证接口响应状态码: {response.status_code}")
+        logger.debug(f"验证接口返回内容: {response.text.strip()}")
         
         if response.status_code == 200:
             try:
                 result = response.json()
                 is_sponsor = result.get('is_sponsor', False)
                 if is_sponsor:
-                    logger.info("✅ 赞助者验证成功，将使用专用下载链接")
+                    logger.debug("赞助者验证成功，将使用专用下载链接")
                     return True, "赞助者验证成功"
                 else:
-                    logger.info("❌ 非赞助者用户，将使用普通下载链接")
+                    logger.debug("非赞助者用户，将使用普通下载链接")
                     return False, "非赞助者用户"
             except json.JSONDecodeError:
                 # 如果不是JSON格式，回退到原来的文本检查方式
                 result = response.text.strip()
                 if "success" in result.lower() or "valid" in result.lower():
-                    logger.info("✅ 赞助者验证成功，将使用专用下载链接")
                     return True, "赞助者验证成功"
                 else:
-                    logger.info("❌ 非赞助者用户，将使用普通下载链接")
                     return False, "非赞助者用户"
         else:
             logger.warning(f"⚠️ 赞助者验证失败，状态码: {response.status_code}，将使用普通下载链接")
@@ -7093,17 +7094,13 @@ def _install_java_thread(version="jdk8"):
         # 根据赞助者身份选择下载链接
         if is_sponsor and "sponsor_url" in JAVA_VERSIONS[version]:
             java_url = JAVA_VERSIONS[version]["sponsor_url"]
-            logger.info(f"✅ 赞助者验证通过！使用专用高速下载链接")
-            logger.info(f"📥 赞助者下载地址: {java_url}")
             environment_install_progress[version]["download_source"] = "sponsor"
         else:
             java_url = JAVA_VERSIONS[version]["url"]
-            logger.info(f"ℹ️ 使用普通下载链接")
-            logger.info(f"📥 普通下载地址: {java_url}")
             environment_install_progress[version]["download_source"] = "public"
         
         environment_install_progress[version]["verify_result"] = verify_msg
-        logger.info(f"🔍 验证结果: {verify_msg}")
+        logger.info(f"验证结果: {verify_msg}")
         
         # 下载JDK
         environment_install_progress[version]["status"] = "downloading"
@@ -7115,14 +7112,13 @@ def _install_java_thread(version="jdk8"):
         
         # 下载文件
         download_source_text = "赞助者专用链接" if is_sponsor else "普通链接"
-        logger.info(f"🚀 开始下载 {JAVA_VERSIONS[version]['display_name']} (通过{download_source_text})")
-        logger.info(f"📂 下载地址: {java_url}")
         response = requests.get(java_url, stream=True)
         response.raise_for_status()
         
         # 获取文件大小
         total_size = int(response.headers.get('content-length', 0))
         downloaded = 0
+        previous_progress = 5
         
         # 写入文件
         with open(temp_file, 'wb') as f:
@@ -7133,7 +7129,9 @@ def _install_java_thread(version="jdk8"):
                     # 更新下载进度
                     if total_size > 0:
                         progress = int(20 * downloaded / total_size) + 5  # 5-25%
+                        progress = max(progress, previous_progress)  # 确保进度不会倒退
                         environment_install_progress[version]["progress"] = min(progress, 25)
+                        previous_progress = progress
         
         # 解压文件
         environment_install_progress[version]["status"] = "extracting"
