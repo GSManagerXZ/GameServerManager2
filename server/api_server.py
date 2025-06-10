@@ -126,6 +126,18 @@ def ensure_backup_config_loaded():
 
 def ensure_auto_start_initialized():
     """确保自启动功能已初始化（用于Gunicorn启动）"""
+    global _auto_start_initialized
+    
+    # 如果已经初始化过，直接返回，避免重复执行
+    if _auto_start_initialized:
+        return
+        
+    # 如果有服务器正在运行，说明已经初始化过了，避免重复执行
+    if running_servers:
+        logger.debug(f"检测到 {len(running_servers)} 个服务器正在运行，跳过自启动检查")
+        _auto_start_initialized = True
+        return
+    
     try:
         auto_start_servers()
         # 打印当前运行的游戏服务器信息
@@ -619,8 +631,19 @@ init_proxy_config()
 
 @app.before_request
 def check_auth():
-    # 确保自启动功能已初始化（用于Gunicorn启动）
-    ensure_auto_start_initialized()
+    # 环境管理相关的API路径，不触发自启动检查
+    environment_api_paths = [
+        '/api/environment/java/status',
+        '/api/environment/java/install',
+        '/api/environment/java/uninstall',
+        '/api/environment/java/check',
+        '/api/environment/status'
+    ]
+    
+    # 只有非环境管理的API请求才触发自启动检查
+    if request.path.startswith('/api/') and not any(request.path.startswith(path) for path in environment_api_paths):
+        # 确保自启动功能已初始化（用于Gunicorn启动）
+        ensure_auto_start_initialized()
     
     # 记录请求路径，帮助调试
     logger.debug(f"收到请求: {request.method} {request.path}, 参数: {request.args}, 头部: {request.headers}")
@@ -1031,8 +1054,11 @@ def run_game_server(game_id, cmd, cwd):
                 config = load_config()
                 auto_restart_servers = config.get('auto_restart_servers', [])
                 
-                if game_id in auto_restart_servers and return_code == 0:
-                    logger.info(f"游戏服务器 {game_id} 异常退出（非人工停止），自动重启中...")
+                if game_id in auto_restart_servers:
+                    if return_code == 0:
+                        logger.info(f"游戏服务器 {game_id} 异常退出（非人工停止），自动重启中...")
+                    else:
+                        logger.info(f"游戏服务器 {game_id} 因错误退出，返回码: {return_code}，自动重启中...")
                     
                     # 在新线程中重启服务器
                     restart_thread = threading.Thread(
@@ -1042,7 +1068,7 @@ def run_game_server(game_id, cmd, cwd):
                     restart_thread.start()
                 else:
                     if return_code != 0:
-                        logger.info(f"游戏服务器 {game_id} 因错误退出，返回码: {return_code}，不进行自动重启")
+                        logger.info(f"游戏服务器 {game_id} 因错误退出，返回码: {return_code}，未配置自动重启")
                     else:
                         logger.info(f"游戏服务器 {game_id} 异常退出，但未配置自动重启")
             else:
