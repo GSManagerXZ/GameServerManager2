@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Spin, message, Typography, Space, Row, Col, Tag, Modal, Progress } from 'antd';
-import { LockOutlined, CloudOutlined, AppstoreOutlined, InfoCircleOutlined, DownloadOutlined, LoadingOutlined } from '@ant-design/icons';
+import { Card, Button, Spin, message, Typography, Space, Row, Col, Tag, Modal, Progress, Input, Select } from 'antd';
+import { LockOutlined, CloudOutlined, AppstoreOutlined, InfoCircleOutlined, DownloadOutlined, LoadingOutlined, SearchOutlined } from '@ant-design/icons';
 import axios from 'axios';
 
 const { Title, Paragraph } = Typography;
+const { Search } = Input;
+const { Option } = Select;
 
 interface OnlineGame {
   id: string;
@@ -11,6 +13,8 @@ interface OnlineGame {
   URL: string;
   script: string;
   txt: string;
+  label?: string[];
+  image?: string;
 }
 
 interface OnlineDeployProps {
@@ -22,10 +26,14 @@ const OnlineDeploy: React.FC<OnlineDeployProps> = () => {
   const [isSponsored, setIsSponsored] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [onlineGames, setOnlineGames] = useState<OnlineGame[]>([]);
+  const [filteredGames, setFilteredGames] = useState<OnlineGame[]>([]);
   const [gamesLoading, setGamesLoading] = useState(false);
   const [deployingGames, setDeployingGames] = useState<{[key: string]: boolean}>({});
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [detailGame, setDetailGame] = useState<OnlineGame | null>(null);
+  const [searchText, setSearchText] = useState('');
+  const [selectedLabel, setSelectedLabel] = useState<string>('all');
+  const [allLabels, setAllLabels] = useState<string[]>([]);
   
   // 部署进度相关状态
   const [deployProgressVisible, setDeployProgressVisible] = useState(false);
@@ -70,9 +78,23 @@ const OnlineDeploy: React.FC<OnlineDeployProps> = () => {
           name: gameId,
           URL: gamesData[gameId].URL,
           script: gamesData[gameId].script,
-          txt: gamesData[gameId].txt
+          txt: gamesData[gameId].txt,
+          label: gamesData[gameId].label || [],
+          image: gamesData[gameId].image
         }));
         setOnlineGames(gamesList);
+        
+        // 提取所有标签
+        const labels = new Set<string>();
+        gamesList.forEach(game => {
+          if (game.label) {
+            game.label.forEach(label => labels.add(label));
+          }
+        });
+        setAllLabels(Array.from(labels));
+        
+        // 初始化过滤后的游戏列表
+        setFilteredGames(gamesList);
       } else {
         message.error('获取在线游戏列表失败');
       }
@@ -200,11 +222,49 @@ const OnlineDeploy: React.FC<OnlineDeployProps> = () => {
     }
   };
 
+  // 过滤游戏列表
+  const filterGames = () => {
+    let filtered = onlineGames;
+    
+    // 按标签筛选
+    if (selectedLabel !== 'all') {
+      filtered = filtered.filter(game => 
+        game.label && game.label.includes(selectedLabel)
+      );
+    }
+    
+    // 按搜索文本筛选
+    if (searchText.trim()) {
+      const searchLower = searchText.toLowerCase();
+      filtered = filtered.filter(game => 
+        game.name.toLowerCase().includes(searchLower) ||
+        (game.txt && game.txt.toLowerCase().includes(searchLower))
+      );
+    }
+    
+    setFilteredGames(filtered);
+  };
+  
+  // 处理搜索
+  const handleSearch = (value: string) => {
+    setSearchText(value);
+  };
+  
+  // 处理标签选择
+  const handleLabelChange = (value: string) => {
+    setSelectedLabel(value);
+  };
+  
   // 显示游戏详情
   const handleShowDetail = (game: OnlineGame) => {
     setDetailGame(game);
     setDetailModalVisible(true);
   };
+  
+  // 当搜索文本或选中标签改变时，重新过滤
+  useEffect(() => {
+    filterGames();
+  }, [searchText, selectedLabel, onlineGames]);
 
   useEffect(() => {
     verifySponsor();
@@ -229,6 +289,10 @@ const OnlineDeploy: React.FC<OnlineDeployProps> = () => {
             <Paragraph>
               抱歉，在线部署功能仅对赞助者开放。
               <br />
+              为什么这么做？在线部署是一个需要用到直链作为下载地址，而直链需要用到服务器，由于国内商用带宽昂贵，而且项目是开源的我们无法承受所有用户的下载需求，这个成本非常高，所以请各位理解一下。
+              <br />
+              我不想赞助却还想使用此功能。在线部署其实原理和手动上传服务端是完全一样的，您可以使用半自动部署手动从网站下载到的资源上传实现一样的效果。
+              <br />
               如果您已经是赞助者，请确保已正确配置赞助者密钥。
             </Paragraph>
             <Button 
@@ -246,18 +310,42 @@ const OnlineDeploy: React.FC<OnlineDeployProps> = () => {
 
   return (
     <div>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Title level={3} style={{ margin: 0 }}>
-          <CloudOutlined style={{ marginRight: 8, color: '#52c41a' }} />
-          在线部署
-        </Title>
-        <Button 
-          type="primary" 
-          loading={gamesLoading}
-          onClick={fetchOnlineGames}
-        >
-          刷新列表
-        </Button>
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <Title level={3} style={{ margin: 0 }}>
+            <CloudOutlined style={{ marginRight: 8, color: '#52c41a' }} />
+            在线部署
+          </Title>
+          <Button 
+            type="primary" 
+            loading={gamesLoading}
+            onClick={fetchOnlineGames}
+          >
+            刷新列表
+          </Button>
+        </div>
+        
+        {/* 搜索和筛选区域 */}
+        <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+          <Search
+            placeholder="搜索游戏名称或描述"
+            allowClear
+            style={{ flex: 1 }}
+            onSearch={handleSearch}
+            onChange={(e) => handleSearch(e.target.value)}
+          />
+          <Select
+            value={selectedLabel}
+            onChange={handleLabelChange}
+            style={{ width: 200 }}
+            placeholder="选择标签筛选"
+          >
+            <Option value="all">全部标签</Option>
+            {allLabels.map(label => (
+              <Option key={label} value={label}>{label}</Option>
+            ))}
+          </Select>
+        </div>
       </div>
       
       {gamesLoading ? (
@@ -267,7 +355,7 @@ const OnlineDeploy: React.FC<OnlineDeployProps> = () => {
         </div>
       ) : (
         <Row gutter={[16, 16]}>
-          {onlineGames.map((game) => {
+          {filteredGames.map((game) => {
             const isDeploying = deployingGames[game.id];
             
             return (
@@ -275,16 +363,29 @@ const OnlineDeploy: React.FC<OnlineDeployProps> = () => {
                 <div className="custom-game-card">
                   {/* 游戏封面图片 */}
                   <div className="game-cover">
-                    <div className="game-cover-placeholder">
-                      <CloudOutlined />
-                    </div>
+                    {game.image ? (
+                      <img 
+                        src={game.image} 
+                        alt={game.name}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    ) : (
+                      <div className="game-cover-placeholder">
+                        <CloudOutlined />
+                      </div>
+                    )}
                   </div>
                   <div className="card-header">
                     <h3>{game.name}</h3>
-                    <Tag color="orange">在线部署</Tag>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
+                      <Tag color="orange">在线部署</Tag>
+                      {game.label && game.label.map(label => (
+                        <Tag key={label} color="blue">{label}</Tag>
+                      ))}
+                    </div>
                   </div>
                   <div className="card-content">
-                    <p>{game.txt || '暂无描述'}</p>
+                    <p>{game.txt ? (game.txt.length > 20 ? game.txt.substring(0, 20) + '...' : game.txt) : '暂无描述'}</p>
                   </div>
                   <div className="card-actions">
                     <button 
@@ -315,6 +416,13 @@ const OnlineDeploy: React.FC<OnlineDeployProps> = () => {
         </div>
       )}
       
+      {!gamesLoading && onlineGames.length > 0 && filteredGames.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '50px' }}>
+          <SearchOutlined style={{ fontSize: '64px', color: '#d9d9d9' }} />
+          <div style={{ marginTop: 16, color: '#999' }}>没有找到符合条件的游戏</div>
+        </div>
+      )}
+      
       {/* 游戏详情Modal */}
       <Modal
         title={`${detailGame?.name || ''} 详细信息`}
@@ -340,6 +448,17 @@ const OnlineDeploy: React.FC<OnlineDeployProps> = () => {
              )}
              <p><strong>游戏名称:</strong> {detailGame.name}</p>
              <p><strong>游戏ID:</strong> {detailGame.id}</p>
+             
+             {detailGame.label && detailGame.label.length > 0 && (
+               <div style={{ marginBottom: 16 }}>
+                 <strong>游戏标签:</strong>
+                 <div style={{ marginTop: 8 }}>
+                   {detailGame.label.map(label => (
+                     <Tag key={label} color="blue" style={{ marginBottom: 4 }}>{label}</Tag>
+                   ))}
+                 </div>
+               </div>
+             )}
             
             {detailGame.txt && (
               <div>
