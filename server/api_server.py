@@ -27,6 +27,7 @@ import rarfile
 import lzma
 import stat
 import zstandard as zstd
+import multiprocessing
 from functools import wraps
 from flask import Flask, jsonify, request, send_from_directory, Response, stream_with_context, g, render_template_string, send_file, make_response
 from werkzeug.utils import secure_filename
@@ -635,7 +636,7 @@ init_proxy_config()
 
 @app.before_request
 def check_auth():
-    # 环境管理相关的API路径，不触发自启动检查
+    # 环境管理相关的API路由，不触发自启动检查
     environment_api_paths = [
         '/api/environment/java/status',
         '/api/environment/java/install',
@@ -1716,16 +1717,9 @@ def uninstall_game():
                 except Exception as e:
                     logger.error(f"停止游戏服务器 {game_id} 时出错: {str(e)}")
                     
-        # 使用steam用户删除目录，避免权限问题
-        try:
-            # 先尝试使用steam用户删除
-            uninstall_cmd = f"su - steam -c 'rm -rf {shlex.quote(game_dir)}'"
-            logger.info(f"以steam用户运行卸载命令: {uninstall_cmd}")
-            subprocess.run(uninstall_cmd, shell=True, check=True)
-        except subprocess.CalledProcessError:
-            # 如果失败，尝试直接删除
-            logger.warning(f"使用steam用户删除失败，尝试直接删除: {game_dir}")
-            shutil.rmtree(game_dir)
+        # 直接删除游戏目录
+        logger.info(f"直接删除游戏目录: {game_dir}")
+        shutil.rmtree(game_dir)
             
         # 清理服务器状态
         if game_id in running_servers:
@@ -6106,9 +6100,10 @@ def get_online_games():
             'message': f'获取游戏列表时发生错误: {str(e)}'
         }), 500
 
-# 在线部署相关的全局变量
-active_online_deployments = {}  # game_id -> deployment_data
-online_deploy_queues = {}  # game_id -> queue
+# 在线部署相关的全局变量 (使用multiprocessing.Manager)
+manager = multiprocessing.Manager()
+active_online_deployments = manager.dict()  # game_id -> deployment_data (manager.dict)
+online_deploy_queues = manager.dict()  # game_id -> queue (manager.Queue)
 
 @app.route('/api/online-deploy', methods=['POST'])
 @auth_required
@@ -6143,34 +6138,34 @@ def deploy_online_game():
                 'message': f'游戏 {game_name} 正在部署中，请等待完成'
             }), 409
         
-        # 初始化部署状态
-        active_online_deployments[game_id] = {
-            'game_name': game_name,
-            'download_url': download_url,
-            'script_content': script_content,
-            'status': 'starting',
-            'progress': 0,
-            'message': '正在准备部署...',
-            'complete': False,
-            'start_time': time.time()
-        }
+        # 初始化部署状态 (使用Manager)
+        deployment_data = manager.dict()
+        deployment_data['game_name'] = game_name
+        deployment_data['download_url'] = download_url
+        deployment_data['script_content'] = script_content
+        deployment_data['status'] = 'starting'
+        deployment_data['progress'] = 0
+        deployment_data['message'] = '正在准备部署...'
+        deployment_data['complete'] = False
+        deployment_data['start_time'] = time.time()
+        active_online_deployments[game_id] = deployment_data
         
-        online_deploy_queues[game_id] = queue.Queue()
+        deploy_queue = manager.Queue()
+        online_deploy_queues[game_id] = deploy_queue
         
-        # 启动部署线程
-        deploy_thread = threading.Thread(
+        # 启动部署进程
+        deploy_process = multiprocessing.Process(
             target=_deploy_online_game_worker,
-            args=(game_id, game_name, download_url, script_content),
+            args=(game_id, game_name, download_url, script_content, deployment_data, deploy_queue),
             daemon=True
         )
-        deploy_thread.start()
+        deploy_process.start()
         
         return jsonify({
             'status': 'success',
             'message': f'开始部署游戏 {game_name}',
             'game_id': game_id
         }), 200
-        
         
     except Exception as e:
         logger.error(f"启动在线游戏部署时发生错误: {str(e)}")
@@ -6179,176 +6174,12 @@ def deploy_online_game():
             'message': f'启动部署时发生错误: {str(e)}'
         }), 500
 
-def _deploy_online_game_worker(game_id, game_name, download_url, script_content):
-    """在线游戏部署工作线程"""
-    import requests
-    import zipfile
-    import tempfile
-    import shutil
-    import time
+def _deploy_online_game_worker(game_id, game_name, download_url, script_content, deployment_data, deploy_queue):
+    """在线游戏部署工作线程 - 调用aria2下载器模块"""
+    from aria2_downloader import deploy_online_game_worker
     
-    try:
-        # 降低当前线程的优先级，避免影响游戏服务器性能
-        try:
-            import os
-            # 设置进程为低优先级（仅在Linux系统上有效）
-            os.nice(10)  # 增加nice值，降低优先级
-        except (ImportError, OSError):
-            pass  # 如果设置失败，继续执行
-        deploy_queue = online_deploy_queues[game_id]
-        deployment_data = active_online_deployments[game_id]
-        
-        # 创建游戏目录
-        games_dir = '/home/steam/games'
-        game_dir = os.path.join(games_dir, game_name)
-        
-        # 确保games目录存在
-        os.makedirs(games_dir, exist_ok=True)
-        
-        # 阶段1: 准备目录
-        deployment_data['status'] = 'preparing'
-        deployment_data['progress'] = 5
-        deployment_data['message'] = '正在准备部署目录...'
-        deploy_queue.put({'progress': 5, 'status': 'preparing', 'message': '正在准备部署目录...'})
-        
-        # 如果游戏目录已存在，先删除
-        if os.path.exists(game_dir):
-            shutil.rmtree(game_dir)
-        
-        # 创建新的游戏目录
-        os.makedirs(game_dir, exist_ok=True)
-        
-        # 阶段2: 下载文件
-        deployment_data['status'] = 'downloading'
-        deployment_data['progress'] = 10
-        deployment_data['message'] = '正在下载游戏文件...'
-        deploy_queue.put({'progress': 10, 'status': 'downloading', 'message': '正在下载游戏文件...'})
-        
-        logger.info(f"开始下载游戏 {game_name} 的服务端文件...")
-        # 优化请求配置以提升下载速度
-        session = requests.Session()
-        session.headers.update({
-            'User-Agent': 'GSManager/1.0',
-            'Accept-Encoding': 'gzip, deflate'
-        })
-        response = session.get(download_url, stream=True, timeout=600)  # 增加超时时间
-        response.raise_for_status()
-        
-        total_size = int(response.headers.get('content-length', 0))
-        downloaded_size = 0
-        
-        # 创建临时文件保存下载的压缩包
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as temp_file:
-            chunk_count = 0
-            # 使用更大的chunk大小提升下载速度
-            for chunk in response.iter_content(chunk_size=65536):  # 64KB chunk
-                temp_file.write(chunk)
-                downloaded_size += len(chunk)
-                chunk_count += 1
-                
-                # 减少休息频率，每处理500个chunk后短暂休息
-                if chunk_count % 500 == 0:
-                    time.sleep(0.005)  # 休息5毫秒
-                
-                # 更新下载进度 (10% - 60%)
-                if total_size > 0:
-                    download_progress = int(min(60, 10 + (downloaded_size / total_size) * 50))
-                    deployment_data['progress'] = download_progress
-                    deploy_queue.put({
-                        'progress': download_progress, 
-                        'status': 'downloading', 
-                        'message': f'正在下载游戏文件... ({downloaded_size // 1024 // 1024}MB/{total_size // 1024 // 1024}MB)'
-                    })
-            temp_zip_path = temp_file.name
-        
-        try:
-            # 阶段3: 解压文件
-            deployment_data['status'] = 'extracting'
-            deployment_data['progress'] = 70
-            deployment_data['message'] = '正在解压游戏文件...'
-            deploy_queue.put({'progress': 70, 'status': 'extracting', 'message': '正在解压游戏文件...'})
-            
-            logger.info(f"正在解压到 {game_dir}...")
-            with zipfile.ZipFile(temp_zip_path, 'r') as zip_ref:
-                # 获取压缩包中的文件列表
-                file_list = zip_ref.namelist()
-                total_files = len(file_list)
-                
-                # 逐个解压文件，避免一次性占用过多资源
-                for i, file_info in enumerate(file_list):
-                    zip_ref.extract(file_info, game_dir)
-                    
-                    # 减少休息频率，每解压50个文件后短暂休息
-                    if i % 50 == 0:
-                        time.sleep(0.002)  # 休息2毫秒
-                        
-                        # 更新解压进度
-                        extract_progress = int(70 + (i / total_files) * 20)  # 70%-90%
-                        deployment_data['progress'] = extract_progress
-                        deploy_queue.put({
-                            'progress': extract_progress,
-                            'status': 'extracting',
-                            'message': f'正在解压游戏文件... ({i+1}/{total_files})'
-                        })
-            
-            # 阶段4: 创建启动脚本
-            deployment_data['status'] = 'creating_script'
-            deployment_data['progress'] = 90
-            deployment_data['message'] = '正在创建启动脚本...'
-            deploy_queue.put({'progress': 90, 'status': 'creating_script', 'message': '正在创建启动脚本...'})
-            
-            start_script_path = os.path.join(game_dir, 'start.sh')
-            with open(start_script_path, 'w', encoding='utf-8') as f:
-                f.write(script_content)
-            
-            # 给启动脚本添加执行权限
-            os.chmod(start_script_path, 0o755)
-            
-            # 阶段5: 完成部署
-            deployment_data['status'] = 'completed'
-            deployment_data['progress'] = 100
-            deployment_data['message'] = f'游戏 {game_name} 部署成功'
-            deployment_data['complete'] = True
-            deployment_data['game_dir'] = game_dir
-            
-            deploy_queue.put({
-                'progress': 100, 
-                'status': 'completed', 
-                'message': f'游戏 {game_name} 部署成功',
-                'complete': True,
-                'game_dir': game_dir
-            })
-            
-            logger.info(f"游戏 {game_name} 部署成功")
-            
-        finally:
-            # 清理临时文件
-            if os.path.exists(temp_zip_path):
-                os.unlink(temp_zip_path)
-                
-    except requests.exceptions.RequestException as e:
-        error_msg = f'下载游戏文件失败: {str(e)}'
-        logger.error(error_msg)
-        deployment_data['status'] = 'error'
-        deployment_data['message'] = error_msg
-        deployment_data['complete'] = True
-        deploy_queue.put({'progress': deployment_data['progress'], 'status': 'error', 'message': error_msg, 'complete': True})
-        
-    except zipfile.BadZipFile as e:
-        error_msg = '下载的文件不是有效的ZIP压缩包'
-        logger.error(f"解压文件失败: {str(e)}")
-        deployment_data['status'] = 'error'
-        deployment_data['message'] = error_msg
-        deployment_data['complete'] = True
-        deploy_queue.put({'progress': deployment_data['progress'], 'status': 'error', 'message': error_msg, 'complete': True})
-        
-    except Exception as e:
-        error_msg = f'部署时发生错误: {str(e)}'
-        logger.error(f"部署在线游戏时发生错误: {str(e)}")
-        deployment_data['status'] = 'error'
-        deployment_data['message'] = error_msg
-        deployment_data['complete'] = True
-        deploy_queue.put({'progress': deployment_data['progress'], 'status': 'error', 'message': error_msg, 'complete': True})
+    # 直接调用aria2下载器模块中的函数
+    deploy_online_game_worker(game_id, game_name, download_url, script_content, deployment_data, deploy_queue)
 
 @app.route('/api/online-deploy/stream', methods=['GET'])
 @auth_required
@@ -6378,7 +6209,7 @@ def online_deploy_stream():
         
         # 确保有队列
         if game_id not in online_deploy_queues:
-            online_deploy_queues[game_id] = queue.Queue()
+            online_deploy_queues[game_id] = manager.Queue()
             
             # 如果部署已完成，添加完成消息
             deployment_data = active_online_deployments[game_id]
@@ -7811,158 +7642,6 @@ def get_java_versions():
         })
     except Exception as e:
         logger.error(f"获取Java版本列表时出错: {str(e)}")
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
-
-# 卸载Java的函数
-def uninstall_java(version="jdk8"):
-    """卸载指定版本的Java"""
-    if version not in JAVA_VERSIONS:
-        return False, f"不支持的Java版本: {version}，支持的版本有: {', '.join(JAVA_VERSIONS.keys())}"
-    
-    java_dir = JAVA_VERSIONS[version]["dir"]
-    
-    # 检查是否已安装
-    installed, _ = check_java_installation(version)
-    if not installed:
-        return False, f"{JAVA_VERSIONS[version]['display_name']}未安装"
-    
-    try:
-        # 删除Java安装目录
-        if os.path.exists(java_dir):
-            shutil.rmtree(java_dir)
-            logger.info(f"{JAVA_VERSIONS[version]['display_name']}卸载成功")
-            return True, f"{JAVA_VERSIONS[version]['display_name']}卸载成功"
-        else:
-            return False, f"{JAVA_VERSIONS[version]['display_name']}安装目录不存在"
-    except Exception as e:
-        logger.error(f"卸载Java时出错: {str(e)}")
-        return False, f"卸载Java时出错: {str(e)}"
-
-@app.route('/api/environment/java/uninstall', methods=['POST'])
-@auth_required
-def uninstall_java_route():
-    """卸载Java"""
-    try:
-        data = request.get_json()
-        version = data.get('version', 'jdk8')
-        
-        # 卸载Java
-        success, message = uninstall_java(version)
-        
-        if success:
-            return jsonify({
-                "status": "success",
-                "message": message
-            })
-        else:
-            return jsonify({
-                "status": "error",
-                "message": message
-            }), 400
-    except Exception as e:
-        logger.error(f"卸载Java时出错: {str(e)}")
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
-
-@app.route('/api/environment/java/cancel', methods=['POST'])
-@auth_required
-def cancel_java_download():
-    """取消Java下载"""
-    try:
-        data = request.get_json()
-        version = data.get('version', 'jdk8')
-        
-        # 检查是否有正在下载的Java
-        with java_download_lock:
-            if current_java_download != version:
-                return jsonify({
-                    "status": "error",
-                    "message": f"{JAVA_VERSIONS.get(version, {}).get('display_name', version)}当前没有在下载"
-                }), 400
-        
-        # 设置取消标志
-        java_download_cancelled[version] = True
-        
-        logger.info(f"用户请求取消{JAVA_VERSIONS.get(version, {}).get('display_name', version)}下载")
-        
-        return jsonify({
-            "status": "success",
-            "message": f"{JAVA_VERSIONS.get(version, {}).get('display_name', version)}下载取消请求已发送"
-        })
-        
-    except Exception as e:
-        logger.error(f"取消Java下载时出错: {str(e)}")
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
-
-# 备份任务管理
-backup_tasks = {}
-backup_task_counter = 0
-BACKUP_CONFIG_FILE = '/home/steam/games/config.json'
-backup_scheduler_running = False
-
-def load_backup_config():
-    """从配置文件加载备份任务"""
-    global backup_tasks, backup_task_counter
-    try:
-        if os.path.exists(BACKUP_CONFIG_FILE):
-            with open(BACKUP_CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                backup_tasks = config.get('backup_tasks', {})
-                backup_task_counter = config.get('backup_task_counter', 0)
-                logger.info(f"已加载 {len(backup_tasks)} 个备份任务")
-        else:
-            # 确保配置文件目录存在
-            os.makedirs(os.path.dirname(BACKUP_CONFIG_FILE), exist_ok=True)
-            save_backup_config()
-    except Exception as e:
-        logger.error(f"加载备份配置失败: {str(e)}")
-        backup_tasks = {}
-        backup_task_counter = 0
-
-def save_backup_config():
-    """保存备份任务到配置文件"""
-    try:
-        # 读取现有配置文件
-        existing_config = {}
-        if os.path.exists(BACKUP_CONFIG_FILE):
-            try:
-                with open(BACKUP_CONFIG_FILE, 'r', encoding='utf-8') as f:
-                    existing_config = json.load(f)
-            except (json.JSONDecodeError, Exception) as e:
-                logger.warning(f"读取现有配置文件失败，将创建新配置: {str(e)}")
-                existing_config = {}
-        
-        # 更新备份相关配置
-        existing_config['backup_tasks'] = backup_tasks
-        existing_config['backup_task_counter'] = backup_task_counter
-        
-        # 保存更新后的配置
-        with open(BACKUP_CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(existing_config, f, ensure_ascii=False, indent=2)
-        logger.info("备份配置已保存")
-    except Exception as e:
-        logger.error(f"保存备份配置失败: {str(e)}")
-
-@app.route('/api/backup/tasks', methods=['GET'])
-@auth_required
-def get_backup_tasks():
-    """获取所有备份任务"""
-    try:
-        ensure_backup_config_loaded()
-        return jsonify({
-            "status": "success",
-            "tasks": list(backup_tasks.values())
-        })
-    except Exception as e:
-        logger.error(f"获取备份任务时出错: {str(e)}")
         return jsonify({
             "status": "error",
             "message": str(e)
