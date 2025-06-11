@@ -44,6 +44,8 @@ from pty_manager import pty_manager
 # 导入MC下载功能
 from MCdownloads import get_server_list, get_server_info, get_builds, get_core_info, download_file
 from sponsor_validator import SponsorValidator
+# 导入Java安装器
+from java_installer import install_java_worker
 
 # 输出管理函数
 def add_server_output(game_id, message, max_lines=500):
@@ -7349,200 +7351,100 @@ def install_java(version="jdk8"):
     }
     java_download_cancelled[version] = False
     
-    # 在新线程中执行安装
-    thread = threading.Thread(target=_install_java_thread, args=(version,))
+    # 使用独立进程执行安装，避免GIL锁竞争
+    from java_installer import install_java_worker
+    
+    # 验证赞助者身份
+    is_sponsor, verify_msg = verify_sponsor_for_java()
+    
+    # 根据赞助者身份选择下载链接
+    if is_sponsor and "sponsor_url" in JAVA_VERSIONS[version]:
+        java_url = JAVA_VERSIONS[version]["sponsor_url"]
+    else:
+        java_url = JAVA_VERSIONS[version]["url"]
+    
+    # 创建进程间通信队列
+    install_queue = multiprocessing.Queue()
+    
+    # 启动独立进程进行安装
+    process = multiprocessing.Process(
+        target=install_java_worker,
+        args=(version, JAVA_VERSIONS, java_url, is_sponsor, install_queue)
+    )
+    process.daemon = True
+    process.start()
+    
+    # 在新线程中监控进程进度
+    thread = threading.Thread(target=_monitor_java_install_process, args=(version, process, install_queue))
     thread.daemon = True
     thread.start()
     
     return True, f"{JAVA_VERSIONS[version]['display_name']}安装已启动"
 
-def _install_java_thread(version="jdk8"):
-    """在后台线程中安装Java"""
+def _monitor_java_install_process(version, process, install_queue):
+    """监控Java安装进程的进度"""
     global current_java_download
     
     try:
-        if version not in JAVA_VERSIONS:
-            raise ValueError(f"不支持的Java版本: {version}")
-        
-        java_dir = JAVA_VERSIONS[version]["dir"]
-        
-        # 验证赞助者身份
-        environment_install_progress[version]["status"] = "verifying_sponsor"
-        environment_install_progress[version]["progress"] = 2
-        
-        is_sponsor, verify_msg = verify_sponsor_for_java()
-        
-        # 根据赞助者身份选择下载链接
-        if is_sponsor and "sponsor_url" in JAVA_VERSIONS[version]:
-            java_url = JAVA_VERSIONS[version]["sponsor_url"]
-            environment_install_progress[version]["download_source"] = "sponsor"
-        else:
-            java_url = JAVA_VERSIONS[version]["url"]
-            environment_install_progress[version]["download_source"] = "public"
-        
-        environment_install_progress[version]["verify_result"] = verify_msg
-        logger.info(f"验证结果: {verify_msg}")
-        
-        # 下载JDK
-        environment_install_progress[version]["status"] = "downloading"
-        environment_install_progress[version]["progress"] = 5
-        
-        # 创建临时目录
-        temp_dir = tempfile.mkdtemp()
-        temp_file = os.path.join(temp_dir, f"{version}.tar.gz")
-        
-        # 下载文件
-        download_source_text = "赞助者专用链接" if is_sponsor else "普通链接"
-        response = requests.get(java_url, stream=True)
-        response.raise_for_status()
-        
-        # 获取文件大小
-        total_size = int(response.headers.get('content-length', 0))
-        downloaded = 0
-        previous_progress = 5
-        
-        # 写入文件
-        with open(temp_file, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                # 检查是否被取消
-                if java_download_cancelled.get(version, False):
-                    logger.info(f"{JAVA_VERSIONS[version]['display_name']} 下载已被取消")
-                    environment_install_progress[version]["status"] = "cancelled"
-                    environment_install_progress[version]["error"] = "下载已被用户取消"
-                    environment_install_progress[version]["completed"] = True
-                    return
+        while process.is_alive() or not install_queue.empty():
+            try:
+                # 从队列中获取进度更新
+                progress_data = install_queue.get(timeout=1)
                 
-                if chunk:
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    # 更新下载进度
-                    if total_size > 0:
-                        progress = int(20 * downloaded / total_size) + 5  # 5-25%
-                        progress = max(progress, previous_progress)  # 确保进度不会倒退
-                        environment_install_progress[version]["progress"] = min(progress, 25)
-                        previous_progress = progress
-        
-        # 解压文件
-        environment_install_progress[version]["status"] = "extracting"
-        environment_install_progress[version]["progress"] = 30
-        
-        # 确保目标目录存在并为空
-        if os.path.exists(java_dir):
-            shutil.rmtree(java_dir)
-        os.makedirs(java_dir, exist_ok=True)
-        
-        # 解压tar.gz文件
-        logger.info(f"解压{JAVA_VERSIONS[version]['display_name']}到: {java_dir}")
-        with tarfile.open(temp_file, "r:gz") as tar:
-            # 获取根目录名称
-            root_dir = tar.getnames()[0].split('/')[0]
-            
-            # 解压所有文件
-            for i, member in enumerate(tar.getmembers()):
-                # 检查是否被取消
+                # 检查是否被用户取消
                 if java_download_cancelled.get(version, False):
-                    logger.info(f"{JAVA_VERSIONS[version]['display_name']} 解压已被取消")
+                    logger.info(f"{JAVA_VERSIONS[version]['display_name']} 安装已被用户取消")
+                    process.terminate()
+                    process.join(timeout=5)
+                    if process.is_alive():
+                        process.kill()
+                    
                     environment_install_progress[version]["status"] = "cancelled"
-                    environment_install_progress[version]["error"] = "解压已被用户取消"
+                    environment_install_progress[version]["error"] = "安装已被用户取消"
                     environment_install_progress[version]["completed"] = True
-                    return
+                    break
                 
-                tar.extract(member, temp_dir)
-                # 更新解压进度
-                progress = int(40 * i / len(tar.getmembers())) + 30  # 30-70%
-                environment_install_progress[version]["progress"] = min(progress, 70)
-        
-        # 移动文件到目标目录
-        environment_install_progress[version]["status"] = "installing"
-        environment_install_progress[version]["progress"] = 75
-        
-        # 源目录是解压后的根目录
-        extracted_files = os.listdir(temp_dir)
-        
-        # 找到解压后的目录
-        source_dir = None
-        for item in extracted_files:
-            if os.path.isdir(os.path.join(temp_dir, item)) and item != "__MACOSX":
-                source_dir = os.path.join(temp_dir, item)
+                # 更新进度数据
+                environment_install_progress[version].update(progress_data)
+                
+                # 如果安装完成或出错，退出循环
+                if progress_data.get('completed', False):
+                    break
+                    
+            except queue.Empty:
+                # 队列为空，继续等待
+                continue
+            except Exception as e:
+                logger.error(f"监控Java安装进程时出错: {e}")
                 break
         
-        if not source_dir:
-            raise Exception("无法找到解压后的Java目录")
+        # 等待进程结束
+        process.join(timeout=5)
         
-        # 复制所有文件到目标目录
-        for item in os.listdir(source_dir):
-            s = os.path.join(source_dir, item)
-            d = os.path.join(java_dir, item)
-            if os.path.isdir(s):
-                shutil.copytree(s, d)
-            else:
-                shutil.copy2(s, d)
-        
-        # 设置执行权限
-        environment_install_progress[version]["status"] = "setting_permissions"
-        environment_install_progress[version]["progress"] = 85
-        
-        # 设置bin目录中所有文件的执行权限
-        bin_dir = os.path.join(java_dir, "bin")
-        for file in os.listdir(bin_dir):
-            file_path = os.path.join(bin_dir, file)
-            st = os.stat(file_path)
-            os.chmod(file_path, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-        
-        # 验证安装
-        environment_install_progress[version]["status"] = "verifying"
-        environment_install_progress[version]["progress"] = 90
-        
-        # 检查java是否可执行
-        java_executable = os.path.join(java_dir, "bin/java")
-        result = subprocess.run([java_executable, "-version"], 
-                               capture_output=True, 
-                               text=True)
-        
-        if result.returncode == 0:
-            # 获取版本信息
-            version_output = result.stderr  # java -version输出到stderr
-            version_match = re.search(r'version "([^"]+)"', version_output)
-            java_version = version_match.group(1) if version_match else "Unknown"
+        # 如果进程仍在运行，强制终止
+        if process.is_alive():
+            logger.warning(f"Java安装进程超时，强制终止")
+            process.terminate()
+            process.join(timeout=2)
+            if process.is_alive():
+                process.kill()
             
-            # 安装完成
-            environment_install_progress[version]["status"] = "completed"
-            environment_install_progress[version]["progress"] = 100
+            # 设置错误状态
+            environment_install_progress[version]["status"] = "error"
+            environment_install_progress[version]["error"] = "安装进程超时"
             environment_install_progress[version]["completed"] = True
-            environment_install_progress[version]["version"] = java_version
-            environment_install_progress[version]["path"] = java_executable
-            environment_install_progress[version]["usage_hint"] = f"使用方式: {java_executable} -version"
-            
-            # 获取下载源信息用于日志
-            download_source = environment_install_progress[version].get("download_source", "unknown")
-            download_source_text = "赞助者专用链接" if download_source == "sponsor" else "普通链接"
-            
-            logger.info(f"{JAVA_VERSIONS[version]['display_name']} 安装成功！")
-            logger.info(f"Java版本: {java_version}")
-            logger.info(f"安装路径: {java_executable}")
-            logger.info(f"下载方式: 通过{download_source_text}下载")
-        else:
-            raise Exception("Java安装后无法执行")
-        
-        # 临时文件将在finally块中清理
         
     except Exception as e:
-        logger.error(f"安装Java时出错: {str(e)}")
+        logger.error(f"监控Java安装进程时出错: {str(e)}")
         environment_install_progress[version]["status"] = "error"
         environment_install_progress[version]["error"] = str(e)
         environment_install_progress[version]["completed"] = True
     finally:
-        # 无论成功还是失败，都要清除当前下载标记和取消标志
+        # 重置当前下载状态
         with java_download_lock:
             current_java_download = None
         # 清理取消标志
         java_download_cancelled.pop(version, None)
-        # 清理临时文件
-        try:
-            if 'temp_dir' in locals() and os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir)
-        except Exception as e:
-            logger.warning(f"清理临时文件失败: {str(e)}")
 
 # Java环境API路由
 @app.route('/api/environment/java/status', methods=['GET'])
@@ -7642,6 +7544,91 @@ def get_java_versions():
         })
     except Exception as e:
         logger.error(f"获取Java版本列表时出错: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+@app.route('/api/environment/java/uninstall', methods=['POST'])
+@auth_required
+def uninstall_java_route():
+    """卸载Java"""
+    try:
+        data = request.get_json()
+        version = data.get('version', 'jdk8')
+        
+        if version not in JAVA_VERSIONS:
+            return jsonify({
+                "status": "error",
+                "message": f"不支持的Java版本: {version}"
+            }), 400
+        
+        # 检查是否已安装
+        installed, _ = check_java_installation(version)
+        if not installed:
+            return jsonify({
+                "status": "success",
+                "message": f"{JAVA_VERSIONS[version]['display_name']}未安装"
+            })
+        
+        # 检查是否正在安装中
+        if current_java_download == version:
+            return jsonify({
+                "status": "error",
+                "message": f"{JAVA_VERSIONS[version]['display_name']}正在安装中，无法卸载"
+            }), 400
+        
+        # 执行卸载
+        java_dir = JAVA_VERSIONS[version]["dir"]
+        if os.path.exists(java_dir):
+            shutil.rmtree(java_dir)
+            logger.info(f"已卸载{JAVA_VERSIONS[version]['display_name']}: {java_dir}")
+        
+        # 清理进度信息
+        environment_install_progress.pop(version, None)
+        
+        return jsonify({
+            "status": "success",
+            "message": f"{JAVA_VERSIONS[version]['display_name']}卸载成功"
+        })
+    except Exception as e:
+        logger.error(f"卸载Java时出错: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+@app.route('/api/environment/java/cancel', methods=['POST'])
+@auth_required
+def cancel_java_download_route():
+    """取消Java下载"""
+    try:
+        data = request.get_json()
+        version = data.get('version', 'jdk8')
+        
+        if version not in JAVA_VERSIONS:
+            return jsonify({
+                "status": "error",
+                "message": f"不支持的Java版本: {version}"
+            }), 400
+        
+        # 检查是否正在下载
+        if current_java_download != version:
+            return jsonify({
+                "status": "error",
+                "message": f"{JAVA_VERSIONS[version]['display_name']}未在下载中"
+            }), 400
+        
+        # 设置取消标志
+        java_download_cancelled[version] = True
+        logger.info(f"用户请求取消{JAVA_VERSIONS[version]['display_name']}下载")
+        
+        return jsonify({
+            "status": "success",
+            "message": f"已请求取消{JAVA_VERSIONS[version]['display_name']}下载"
+        })
+    except Exception as e:
+        logger.error(f"取消Java下载时出错: {str(e)}")
         return jsonify({
             "status": "error",
             "message": str(e)
