@@ -1197,7 +1197,8 @@ const App: React.FC = () => {
   // 添加 handleSendServerInput 函数
   const handleSendServerInput = async (gameId: string, input: string) => {
     try {
-      if (!gameId || !input.trim()) return;
+      // 允许换行符通过，但过滤掉空字符串和只有空格的输入
+      if (!gameId || (input.trim() === '' && input !== '\\n')) return;
       
       // 添加到输出，以便用户可以看到自己的输入
       setServerOutputs(prev => {

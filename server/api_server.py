@@ -1743,7 +1743,7 @@ def send_input():
     data = request.json
     game_id = data.get('game_id')
     value = data.get('value')
-    if not game_id or not value:
+    if not game_id or value is None:
         return jsonify({'status': 'error', 'message': '缺少参数'}), 400
     
     # 使用PTY管理器设置输入值
@@ -2497,18 +2497,7 @@ def server_send_input():
         if pty_manager.send_input(process_id, value):
             logger.info(f"输入发送成功: game_id={game_id}")
             
-            # 将输入回显到输出队列
-            if game_id in server_output_queues:
-                echo_message = f"> {value}"
-                server_output_queues[game_id].put(echo_message)
-                logger.debug(f"输入已回显到输出队列: game_id={game_id}")
-                
-                # 同时保存到输出历史
-                if game_id in running_servers:
-                    if 'output' not in running_servers[game_id]:
-                        running_servers[game_id]['output'] = []
-                    add_server_output(game_id, echo_message)
-                
+            # 不再手动回显，以避免顺序错乱
             return jsonify({'status': 'success', 'message': '输入已发送'})
         else:
             logger.error(f"发送输入失败: game_id={game_id}")
@@ -7433,7 +7422,6 @@ def _monitor_java_install_process(version, process, install_queue):
             environment_install_progress[version]["status"] = "error"
             environment_install_progress[version]["error"] = "安装进程超时"
             environment_install_progress[version]["completed"] = True
-        
     except Exception as e:
         logger.error(f"监控Java安装进程时出错: {str(e)}")
         environment_install_progress[version]["status"] = "error"
