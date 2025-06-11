@@ -359,7 +359,7 @@ const OnlineDeploy: React.FC<OnlineDeployProps> = () => {
             const isDeploying = deployingGames[game.id];
             
             return (
-              <Col key={game.id} xs={24} sm={12} md={8} lg={6}>
+              <Col key={game.id} xs={24} sm={12} md={6} lg={6}>
                 <div className="custom-game-card">
                   {/* 游戏封面图片 */}
                   <div className="game-cover">
@@ -377,13 +377,14 @@ const OnlineDeploy: React.FC<OnlineDeployProps> = () => {
                   </div>
                   <div className="card-header">
                     <h3>{game.name}</h3>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
-                      <Tag color="orange">在线部署</Tag>
-                      {game.label && game.label.map(label => (
+                  </div>
+                  {game.label && game.label.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8, paddingLeft: 16, paddingRight: 16 }}>
+                      {game.label.map(label => (
                         <Tag key={label} color="blue">{label}</Tag>
                       ))}
                     </div>
-                  </div>
+                  )}
                   <div className="card-content">
                     <p>{game.txt ? (game.txt.length > 20 ? game.txt.substring(0, 20) + '...' : game.txt) : '暂无描述'}</p>
                   </div>
