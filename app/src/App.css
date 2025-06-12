@@ -1091,6 +1091,32 @@ body {
   z-index: 1;
 }
 
+/* 文件管理页面独占右边样式 */
+.file-management {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: var(--sider-width);
+  background: #fff;
+  z-index: 5;
+  padding: 16px;
+  overflow: auto;
+  transition: left 0.05s;
+}
+
+/* 当侧边栏折叠时调整文件管理器位置 */
+.content-with-fixed-sider.sider-collapsed .file-management {
+  left: var(--sider-collapsed-width);
+}
+
+/* 移动端时文件管理器占据全屏 */
+@media (max-width: 768px) {
+  .file-management {
+    left: 0;
+  }
+}
+
 /* 停止服务器按钮样式 */
 .stop-server-dropdown .ant-dropdown-menu {
   border-radius: 4px;
