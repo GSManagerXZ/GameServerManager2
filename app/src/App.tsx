@@ -18,7 +18,7 @@ import Settings from './pages/Settings'; // 导入设置页面
 import Environment from './pages/Environment'; // 导入环境安装页面
 import ServerGuide from './pages/ServerGuide'; // 导入开服指南页面
 import PanelManager from './components/PanelManager'; // 导入面板管理组件
-import { fetchGames, installGame, terminateInstall, installByAppId, openGameFolder, checkVersionUpdate } from './api';
+import { fetchGames, installGame, terminateInstall, installByAppId, openGameFolder, checkVersionUpdate, downloadDockerImage } from './api';
 import { GameInfo } from './types';
 import terminalService from './services/terminalService';
 import { useAuth } from './context/AuthContext';
@@ -2914,7 +2914,8 @@ const App: React.FC = () => {
   // 版本检查相关状态
   const [versionUpdateModalVisible, setVersionUpdateModalVisible] = useState<boolean>(false);
   const [latestVersionInfo, setLatestVersionInfo] = useState<{version: string, description: any} | null>(null);
-  const currentVersion = '2.1.0'; // 当前版本号
+  const [downloadingImage, setDownloadingImage] = useState<boolean>(false);
+  const currentVersion = '2.0.0'; // 当前版本号
   
   // 版本检查功能
   const checkForUpdates = async () => {
@@ -2935,6 +2936,91 @@ const App: React.FC = () => {
     } catch (error) {
       // 静默处理版本检查错误，不影响用户体验
       console.warn('版本检查失败:', error);
+    }
+  };
+  
+  // 下载镜像功能
+  const handleDownloadImage = async () => {
+    try {
+      setDownloadingImage(true);
+      message.loading('正在下载并导入镜像，请稍候...', 0);
+      
+      const response = await downloadDockerImage();
+      
+      message.destroy(); // 清除loading消息
+      
+      if (response && response.status === 'success') {
+        message.success(response.message);
+        
+        // 如果有Docker命令，显示复制对话框
+        if (response.docker_command) {
+          Modal.info({
+            title: '镜像下载成功',
+            content: (
+              <div>
+                <p>镜像已成功下载并导入，请复制以下命令手动执行：</p>
+                <div style={{
+                  background: '#f5f5f5',
+                  padding: '12px',
+                  borderRadius: '6px',
+                  fontFamily: 'monospace',
+                  fontSize: '12px',
+                  wordBreak: 'break-all',
+                  marginTop: '12px'
+                }}>
+                  {response.docker_command}
+                </div>
+                <Button 
+                  type="primary" 
+                  style={{ marginTop: '12px' }}
+                  onClick={() => {
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                      navigator.clipboard.writeText(response.docker_command!).then(() => {
+                        message.success('命令已复制到剪贴板');
+                      }).catch(() => {
+                        message.error('复制失败，请手动复制');
+                      });
+                    } else {
+                      // 降级方案
+                      try {
+                        const textArea = document.createElement('textarea');
+                        textArea.value = response.docker_command!;
+                        textArea.style.position = 'fixed';
+                        textArea.style.opacity = '0';
+                        document.body.appendChild(textArea);
+                        textArea.focus();
+                        textArea.select();
+                        const successful = document.execCommand('copy');
+                        document.body.removeChild(textArea);
+                        
+                        if (successful) {
+                          message.success('命令已复制到剪贴板');
+                        } else {
+                          message.error('复制失败，请手动复制');
+                        }
+                      } catch (err) {
+                        message.error('复制失败，请手动复制');
+                      }
+                    }
+                  }}
+                >
+                  复制命令
+                </Button>
+              </div>
+            ),
+            width: 600
+          });
+        }
+        
+        setVersionUpdateModalVisible(false);
+      } else {
+        message.error(response?.message || '下载失败');
+      }
+    } catch (error: any) {
+      message.destroy();
+      message.error(error?.message || '下载镜像时发生错误');
+    } finally {
+      setDownloadingImage(false);
     }
   };
   
@@ -4605,6 +4691,14 @@ const App: React.FC = () => {
             }
           }}>
             复制镜像地址
+          </Button>,
+          <Button 
+            key="downloadImage" 
+            type="default"
+            loading={downloadingImage}
+            onClick={handleDownloadImage}
+          >
+            下载镜像
           </Button>,
           <Button key="download" type="primary" onClick={() => {
             window.open('https://pan.baidu.com/s/1NyinYIwX1xeL4jWafIuOgw?pwd=v75z', '_blank');

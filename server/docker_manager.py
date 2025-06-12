@@ -1,6 +1,8 @@
 import docker
 import json
 import logging
+import subprocess
+import os
 from typing import Dict, List, Optional, Any
 
 # 配置日志
@@ -61,10 +63,18 @@ class DockerManager:
             for container_port, host_bindings in port_bindings.items():
                 if host_bindings:
                     for binding in host_bindings:
+                        # 解析容器端口和协议
+                        if '/' in container_port:
+                            port_num, protocol = container_port.split('/', 1)
+                        else:
+                            port_num = container_port
+                            protocol = 'tcp'  # 默认协议
+                        
                         ports.append({
-                            'container_port': container_port,
+                            'container_port': port_num,
                             'host_port': binding.get('HostPort', ''),
-                            'host_ip': binding.get('HostIp', '0.0.0.0')
+                            'host_ip': binding.get('HostIp', '0.0.0.0'),
+                            'protocol': protocol
                         })
             
             # 解析挂载点
@@ -206,24 +216,28 @@ class DockerManager:
                         value = env.get('value', '')
                         if key:
                             # 对包含特殊字符的值进行引号包装
-                            if ' ' in value or '"' in value or "'" in value:
-                                value = f'"{value.replace('"', '\\"')}"'
-                            cmd_parts.append(f'-e {key}={value}')
+                            if ' ' in str(value) or '"' in str(value) or "'" in str(value) or '$' in str(value) or '&' in str(value):
+                                # 转义双引号并用双引号包装
+                                escaped_value = str(value).replace('"', '\\"')
+                                cmd_parts.append(f'-e "{key}={escaped_value}"')
+                            else:
+                                cmd_parts.append(f'-e {key}={value}')
             
             # 重启策略
             restart_policy = config.get('restart_policy', '')
             if restart_policy:
                 if isinstance(restart_policy, str):
                     # 处理字符串格式的重启策略
-                    if restart_policy != 'no':
+                    if restart_policy != 'no' and restart_policy != '':
                         cmd_parts.append(f'--restart {restart_policy}')
                 elif isinstance(restart_policy, dict) and restart_policy.get('Name'):
-                    # 处理字典格式的重启策略（兼容旧格式）
+                    # 处理字典格式的重启策略（Docker API返回格式）
                     policy_name = restart_policy['Name']
-                    if policy_name == 'on-failure' and restart_policy.get('MaximumRetryCount'):
-                        cmd_parts.append(f'--restart {policy_name}:{restart_policy["MaximumRetryCount"]}')
-                    else:
-                        cmd_parts.append(f'--restart {policy_name}')
+                    if policy_name and policy_name != 'no':
+                        if policy_name == 'on-failure' and restart_policy.get('MaximumRetryCount', 0) > 0:
+                            cmd_parts.append(f'--restart {policy_name}:{restart_policy["MaximumRetryCount"]}')
+                        else:
+                            cmd_parts.append(f'--restart {policy_name}')
             
             # 镜像名称
             if config.get('image'):
@@ -272,6 +286,93 @@ class DockerManager:
         except Exception as e:
             logger.error(f"列出容器失败: {str(e)}")
             return []
+    
+    def download_and_import_image(self, download_url: str, image_name: str = "gameservermanager:latest") -> Dict[str, Any]:
+        """下载并导入Docker镜像"""
+        try:
+            # 创建临时目录
+            temp_dir = "/tmp/gsm_image_download"
+            os.makedirs(temp_dir, exist_ok=True)
+            
+            # 生成临时文件名
+            temp_file = os.path.join(temp_dir, "gameservermanager.tar.xz")
+            
+            logger.info(f"开始下载镜像: {download_url}")
+            
+            # 使用aria2c下载镜像文件
+            aria2_cmd = [
+                'aria2c',
+                '--dir', temp_dir,
+                '--out', 'gameservermanager.tar.xz',
+                '--split=8',
+                '--max-connection-per-server=8',
+                '--min-split-size=1M',
+                '--continue=true',
+                '--max-tries=0',
+                '--retry-wait=5',
+                '--user-agent=GSManager/1.0',
+                '--allow-overwrite=true',
+                download_url
+            ]
+            
+            # 执行下载
+            result = subprocess.run(aria2_cmd, capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                logger.error(f"下载失败: {result.stderr}")
+                return {
+                    'status': 'error',
+                    'message': f'下载失败: {result.stderr}'
+                }
+            
+            # 检查文件是否存在
+            if not os.path.exists(temp_file):
+                return {
+                    'status': 'error',
+                    'message': '下载完成但文件不存在'
+                }
+            
+            logger.info("下载完成，开始导入镜像")
+            
+            # 导入镜像
+            import_cmd = ['docker', 'load', '-i', temp_file]
+            import_result = subprocess.run(import_cmd, capture_output=True, text=True)
+            
+            if import_result.returncode != 0:
+                logger.error(f"导入镜像失败: {import_result.stderr}")
+                return {
+                    'status': 'error',
+                    'message': f'导入镜像失败: {import_result.stderr}'
+                }
+            
+            # 重命名镜像
+            if image_name != "gameservermanager:latest":
+                tag_cmd = ['docker', 'tag', 'gameservermanager:latest', image_name]
+                tag_result = subprocess.run(tag_cmd, capture_output=True, text=True)
+                
+                if tag_result.returncode != 0:
+                    logger.warning(f"重命名镜像失败: {tag_result.stderr}")
+            
+            # 清理临时文件
+            try:
+                os.remove(temp_file)
+                os.rmdir(temp_dir)
+            except Exception as e:
+                logger.warning(f"清理临时文件失败: {str(e)}")
+            
+            logger.info(f"镜像导入成功: {image_name}")
+            return {
+                'status': 'success',
+                'message': f'镜像 {image_name} 导入成功',
+                'image_name': image_name
+            }
+            
+        except Exception as e:
+            logger.error(f"下载并导入镜像失败: {str(e)}")
+            return {
+                'status': 'error',
+                'message': f'下载并导入镜像失败: {str(e)}'
+            }
 
 # 创建全局Docker管理器实例
 docker_manager = DockerManager()

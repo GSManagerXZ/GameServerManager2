@@ -6464,8 +6464,108 @@ def check_version_update():
     except Exception as e:
         logger.error(f"检查版本更新时出错: {str(e)}")
         return jsonify({
-            'status': 'error', 
-            'message': f'检查版本更新失败: {str(e)}'
+                'status': 'error', 
+                'message': f'检查版本更新失败: {str(e)}'
+            }), 500
+
+@app.route('/api/version/download-image', methods=['POST'])
+@auth_required
+def download_docker_image():
+    """下载并导入Docker镜像"""
+    try:
+        # 验证赞助者身份
+        validator = get_sponsor_validator()
+        if not validator.has_sponsor_key() or not validator.validate_sponsor_key():
+            return jsonify({
+                'status': 'error',
+                'message': '此功能仅限赞助者使用，请先配置有效的赞助者凭证'
+            }), 403
+        
+        # 下载和导入Docker镜像
+        download_url = "http://langlangy.server.xiaozhuhouses.asia:8082/disk1/Docker/GSM%e9%9d%a2%e6%9d%bf/gameservermanager.tar.xz"
+        result = docker_manager.download_and_import_image(download_url, "gameservermanager:latest")
+        
+        if result['status'] != 'success':
+            logger.error(f"下载或导入镜像失败: {result['message']}")
+            return jsonify({
+                'status': 'error',
+                'message': f'下载或导入镜像失败: {result["message"]}'
+            }), 500
+        
+        logger.info("镜像下载和导入成功，开始获取容器配置")
+        
+        # 获取当前容器配置
+        container_info = docker_manager.get_container_info('GSManager')
+        
+        if container_info:
+             logger.info(f"获取到容器信息:")
+             logger.info(f"  - 容器名称: {container_info.get('name')}")
+             logger.info(f"  - 镜像: {container_info.get('image')}")
+             logger.info(f"  - 网络模式: {container_info.get('network_mode')}")
+             logger.info(f"  - 端口映射: {container_info.get('ports')}")
+             logger.info(f"  - 挂载点: {container_info.get('mounts')}")
+             logger.info(f"  - 环境变量数量: {len(container_info.get('environment', []))}")
+             logger.info(f"  - 重启策略: {container_info.get('restart_policy')}")
+             
+             # 更新镜像名称为最新版本
+             container_info['image'] = 'gameservermanager:latest'
+             
+             # 生成完整的启动命令
+             docker_command = docker_manager.generate_docker_command(container_info)
+             
+             if docker_command:
+                 logger.info(f"生成的Docker命令: {docker_command}")
+                 return jsonify({
+                     'status': 'success',
+                     'message': '已生成基于当前容器配置的启动命令',
+                     'docker_command': docker_command,
+                     'container_config': container_info
+                 })
+             else:
+                 logger.error("生成Docker命令失败")
+                 return jsonify({
+                     'status': 'error',
+                     'message': '生成Docker命令失败'
+                 }), 500
+        else:
+            logger.warning("未找到GSManager容器，尝试查找其他可能的容器名称")
+            
+            # 尝试查找可能的容器名称变体
+            possible_names = ['GSManager', 'gameservermanager', 'gsm', 'game-server-manager', 'GameServerManager']
+            found_container = None
+            
+            for name in possible_names:
+                container_info = docker_manager.get_container_info(name)
+                if container_info:
+                    found_container = container_info
+                    logger.info(f"找到容器: {name}")
+                    break
+            
+            if found_container:
+                # 更新容器名称和镜像
+                found_container['name'] = 'GSManager'
+                found_container['image'] = 'gameservermanager:latest'
+                
+                docker_command = docker_manager.generate_docker_command(found_container)
+                
+                return jsonify({
+                    'status': 'success',
+                    'message': '已基于现有容器配置生成启动命令',
+                    'docker_command': docker_command,
+                    'container_config': found_container
+                })
+            else:
+                logger.error("未找到任何相关容器，无法生成完整的启动命令")
+                return jsonify({
+                    'status': 'error',
+                    'message': '未找到GSManager容器，无法生成完整的启动命令。请确保容器正在运行。'
+                }), 404
+            
+    except Exception as e:
+        logger.error(f"下载Docker镜像时出错: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'下载Docker镜像失败: {str(e)}'
         }), 500
 
 @app.route('/api/server/list_scripts', methods=['GET'])
