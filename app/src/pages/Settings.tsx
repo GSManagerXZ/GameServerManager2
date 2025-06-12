@@ -529,7 +529,7 @@ const Settings: React.FC = () => {
             {renderProxySection()}
           </div>
         </TabPane>
-        <TabPane tab={<><DockerOutlined /> 面板管理</>} key="panel">
+        <TabPane tab="面板管理" key="panel">
           <PanelManager />
         </TabPane>
         <TabPane tab="日志" key="logs">
