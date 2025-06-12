@@ -1006,16 +1006,16 @@ const App: React.FC = () => {
     loadRandomBackground();
   }, [loadRandomBackground]);
   
-  // 新增：每30秒刷新一次背景图片
-  useEffect(() => {
-    if (!enableRandomBackground) return;
-    
-    const interval = setInterval(() => {
-      loadRandomBackground();
-    }, 30000); // 30秒
-    
-    return () => clearInterval(interval);
-  }, [loadRandomBackground]);
+  // 移除自动刷新背景图片的定时器，确保每次网页刷新时只显示一次
+  // useEffect(() => {
+  //   if (!enableRandomBackground) return;
+  //   
+  //   const interval = setInterval(() => {
+  //     loadRandomBackground();
+  //   }, 30000); // 30秒
+  //   
+  //   return () => clearInterval(interval);
+  // }, [loadRandomBackground]);
   
   // 新增：动态设置CSS变量来更新背景图片
   useEffect(() => {

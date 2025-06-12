@@ -723,6 +723,15 @@ output_queues = {}
 running_servers = {}  # game_id: {'process': process, 'output': [], 'master_fd': fd, 'started_at': time.time()}
 server_output_queues = {}  # game_id: queue.Queue()
 
+# 备份任务计数器
+backup_task_counter = 0
+
+# 备份任务字典
+backup_tasks = {}
+
+# 备份调度器运行状态
+backup_scheduler_running = False
+
 # 加载游戏配置
 def load_games_config():
     with open(GAMES_CONFIG, 'r', encoding='utf-8') as f:
@@ -7724,6 +7733,30 @@ def cancel_java_download_route():
             "message": str(e)
         }), 500
 
+@app.route('/api/backup/tasks', methods=['GET'])
+@auth_required
+def get_backup_tasks():
+    """获取备份任务列表"""
+    try:
+        ensure_backup_config_loaded()
+        # 将backup_tasks对象转换为数组格式
+        tasks_list = []
+        for task_id, task_data in backup_tasks.items():
+            task_info = task_data.copy()
+            task_info['id'] = task_id
+            tasks_list.append(task_info)
+        
+        return jsonify({
+            "status": "success",
+            "tasks": tasks_list
+        })
+    except Exception as e:
+        logger.error(f"获取备份任务列表时出错: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
 @app.route('/api/backup/tasks', methods=['POST'])
 @auth_required
 def create_backup_task():
@@ -8120,6 +8153,41 @@ def stop_backup_scheduler():
     global backup_scheduler_running
     backup_scheduler_running = False
     logger.info("备份调度器已停止")
+
+def load_backup_config():
+    """加载备份配置"""
+    global backup_tasks, backup_task_counter
+    try:
+        backup_config_file = '/home/steam/games/backup_config.json'
+        if os.path.exists(backup_config_file):
+            with open(backup_config_file, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                backup_tasks = config.get('tasks', {})
+                backup_task_counter = config.get('counter', 0)
+                logger.info(f"已加载 {len(backup_tasks)} 个备份任务")
+        else:
+            backup_tasks = {}
+            backup_task_counter = 0
+            logger.info("备份配置文件不存在，使用默认配置")
+    except Exception as e:
+        logger.error(f"加载备份配置失败: {str(e)}")
+        backup_tasks = {}
+        backup_task_counter = 0
+
+def save_backup_config():
+    """保存备份配置"""
+    try:
+        backup_config_file = '/home/steam/games/backup_config.json'
+        os.makedirs(os.path.dirname(backup_config_file), exist_ok=True)
+        config = {
+            'tasks': backup_tasks,
+            'counter': backup_task_counter
+        }
+        with open(backup_config_file, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        logger.debug("备份配置已保存")
+    except Exception as e:
+        logger.error(f"保存备份配置失败: {str(e)}")
 
 # Minecraft部署相关API
 @app.route('/api/minecraft/servers', methods=['GET'])

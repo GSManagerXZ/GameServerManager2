@@ -815,7 +815,7 @@ const PanelManager: React.FC = () => {
       >
         <Alert
           message="使用说明"
-          description="请先停止当前容器，然后在宿主机执行以下命令来重建容器。建议在执行前备份重要数据。"
+          description="由于容器更新需要删除之前容器，请确保在执行命令前正确将游戏存档目录映射到宿主路径，避免存档丢失！"
           type="warning"
           showIcon
           style={{ marginBottom: 16 }}
