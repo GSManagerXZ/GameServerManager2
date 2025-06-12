@@ -46,6 +46,8 @@ from MCdownloads import get_server_list, get_server_info, get_builds, get_core_i
 from sponsor_validator import SponsorValidator
 # 导入Java安装器
 from java_installer import install_java_worker
+# 导入Docker管理器
+from docker_manager import docker_manager
 
 # 输出管理函数
 def add_server_output(game_id, message, max_lines=500):
@@ -8296,6 +8298,115 @@ def export_api_server_log():
         return jsonify({
             'status': 'error',
             'message': f'导出日志失败: {str(e)}'
+        }), 500
+
+# Docker管理API
+@app.route('/api/docker/containers', methods=['GET'])
+@auth_required
+def list_docker_containers():
+    """获取所有Docker容器列表"""
+    try:
+        containers = docker_manager.list_containers(all_containers=True)
+        return jsonify({
+            'status': 'success',
+            'containers': containers
+        })
+    except Exception as e:
+        logger.error(f"获取容器列表失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'获取容器列表失败: {str(e)}'
+        }), 500
+
+@app.route('/api/docker/container/<container_name>', methods=['GET'])
+@auth_required
+def get_docker_container_info(container_name):
+    """获取指定容器的详细信息"""
+    try:
+        if not docker_manager.is_connected():
+            return jsonify({
+                'status': 'error',
+                'message': 'Docker服务未连接，请检查Docker是否正常运行'
+            }), 500
+        
+        container_info = docker_manager.get_container_info(container_name)
+        if not container_info:
+            return jsonify({
+                'status': 'error',
+                'message': f'容器 {container_name} 不存在'
+            }), 404
+        
+        return jsonify({
+            'status': 'success',
+            'container': container_info
+        })
+    except Exception as e:
+        logger.error(f"获取容器信息失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'获取容器信息失败: {str(e)}'
+        }), 500
+
+@app.route('/api/docker/container/<container_name>/stop', methods=['POST'])
+@auth_required
+def stop_container(container_name):
+    """停止指定容器"""
+    try:
+        result = docker_manager.stop_container(container_name)
+        if result['status'] == 'error':
+            return jsonify(result), 500
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"停止容器失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'停止容器失败: {str(e)}'
+        }), 500
+
+@app.route('/api/docker/container/<container_name>/restart', methods=['POST'])
+@auth_required
+def restart_container(container_name):
+    """重启指定容器"""
+    try:
+        result = docker_manager.restart_container(container_name)
+        if result['status'] == 'error':
+            return jsonify(result), 500
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"重启容器失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'重启容器失败: {str(e)}'
+        }), 500
+
+@app.route('/api/docker/generate-command', methods=['POST'])
+@auth_required
+def generate_docker_command():
+    """根据配置生成Docker运行命令"""
+    try:
+        config = request.get_json()
+        if not config:
+            return jsonify({
+                'status': 'error',
+                'message': '请提供容器配置信息'
+            }), 400
+        
+        command = docker_manager.generate_docker_command(config)
+        if not command:
+            return jsonify({
+                'status': 'error',
+                'message': '生成Docker命令失败'
+            }), 500
+        
+        return jsonify({
+            'status': 'success',
+            'command': command
+        })
+    except Exception as e:
+        logger.error(f"生成Docker命令失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'生成Docker命令失败: {str(e)}'
         }), 500
 
 if __name__ == '__main__':

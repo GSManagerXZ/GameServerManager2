@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Typography, Card, Tabs, Form, Input, Button, message, Alert, Divider, Spin, Switch, InputNumber, Select, Space } from 'antd';
 import axios from 'axios';
-import { HeartOutlined, InfoCircleOutlined, FileTextOutlined, DownloadOutlined, ReloadOutlined, GlobalOutlined } from '@ant-design/icons';
+import { HeartOutlined, InfoCircleOutlined, FileTextOutlined, DownloadOutlined, ReloadOutlined, GlobalOutlined, DockerOutlined } from '@ant-design/icons';
+import PanelManager from '../components/PanelManager';
 
 const { Title, Paragraph } = Typography;
 const { TabPane } = Tabs;
@@ -527,6 +528,9 @@ const Settings: React.FC = () => {
           <div style={{ maxWidth: 600, margin: '0 auto', padding: '20px 0' }}>
             {renderProxySection()}
           </div>
+        </TabPane>
+        <TabPane tab={<><DockerOutlined /> 面板管理</>} key="panel">
+          <PanelManager />
         </TabPane>
         <TabPane tab="日志" key="logs">
           <div style={{ padding: '20px 0' }}>

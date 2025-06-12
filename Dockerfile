@@ -27,6 +27,7 @@ RUN apt-get update && apt-get upgrade -y \
         wget \
         curl \
         jq \
+        docker.io \
         xdg-user-dirs \
         libncurses5:i386 \
         libbz2-1.0:i386 \
@@ -202,7 +203,7 @@ RUN ln -sf /usr/bin/python3.13 /usr/bin/python3 \
     && ln -sf /usr/local/bin/pip3.13 /usr/bin/pip3
 
 # 安装后端依赖
-RUN python3.13 -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple flask flask-cors gunicorn requests psutil PyJWT rarfile zstandard
+RUN python3.13 -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple flask flask-cors gunicorn requests psutil PyJWT rarfile zstandard docker
 
 # 添加启动脚本
 RUN echo '#!/bin/bash\n\

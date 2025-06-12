@@ -17,6 +17,7 @@ import About from './pages/About'; // 导入关于项目页面
 import Settings from './pages/Settings'; // 导入设置页面
 import Environment from './pages/Environment'; // 导入环境安装页面
 import ServerGuide from './pages/ServerGuide'; // 导入开服指南页面
+import PanelManager from './components/PanelManager'; // 导入面板管理组件
 import { fetchGames, installGame, terminateInstall, installByAppId, openGameFolder, checkVersionUpdate } from './api';
 import { GameInfo } from './types';
 import terminalService from './services/terminalService';
