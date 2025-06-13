@@ -5,6 +5,16 @@ import axios from 'axios';
 // 导入antd样式
 import 'antd/dist/antd.css';
 import './App.css';
+
+// 配置message为右上角通知样式，3秒自动消失
+message.config({
+  top: 24,
+  duration: 3,
+  maxCount: 5,
+  rtl: false,
+  prefixCls: 'ant-message',
+  getContainer: () => document.body,
+});
 import Terminal from './components/Terminal';
 import SimpleServerTerminal from './components/SimpleServerTerminal';
 import ContainerInfo from './components/ContainerInfo';
@@ -1261,12 +1271,18 @@ const App: React.FC = () => {
           
           // 添加游戏来源提示
           if (gameResp.data.source === 'cloud') {
-            message.success('已以赞助者身份从云端获取游戏列表');
+            message.success('赞助者验证通过');
           } 
           // 如果有云端错误但仍然使用了本地游戏列表
           else if (gameResp.data.cloud_error) {
             if (gameResp.data.cloud_error.includes('403')) {
-              message.error('赞助者凭证验证不通过，已切换至本地游戏列表');
+              message.error('赞助者凭证验证不通过，已自动清除无效凭证');
+              // 删除无效的赞助者凭证
+              try {
+                await axios.delete('/api/settings/sponsor-key');
+              } catch (error) {
+                console.error('删除赞助者凭证失败:', error);
+              }
             } else {
               message.warn(`云端连接失败：${gameResp.data.cloud_error}，已使用本地游戏列表`);
             }
@@ -2915,7 +2931,7 @@ const App: React.FC = () => {
   const [versionUpdateModalVisible, setVersionUpdateModalVisible] = useState<boolean>(false);
   const [latestVersionInfo, setLatestVersionInfo] = useState<{version: string, description: any} | null>(null);
   const [downloadingImage, setDownloadingImage] = useState<boolean>(false);
-  const currentVersion = '2.1.0'; // 当前版本号
+  const currentVersion = '2.2.0'; // 当前版本号
   
   // 版本检查功能
   const checkForUpdates = async () => {

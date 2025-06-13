@@ -5987,6 +5987,22 @@ def get_sponsor_key():
         logger.error(f"获取赞助者凭证时出错: {str(e)}")
         return jsonify({'status': 'error', 'message': f'获取赞助者凭证失败: {str(e)}'}), 500
 
+@app.route('/api/settings/sponsor-key', methods=['DELETE'])
+def delete_sponsor_key():
+    """删除赞助者凭证"""
+    try:
+        # 使用赞助者验证模块删除密钥
+        validator = get_sponsor_validator()
+        
+        if validator.remove_sponsor_key():
+            return jsonify({'status': 'success', 'message': '赞助者凭证已删除'})
+        else:
+            return jsonify({'status': 'error', 'message': '删除赞助者凭证失败'}), 500
+            
+    except Exception as e:
+        logger.error(f"删除赞助者凭证时出错: {str(e)}")
+        return jsonify({'status': 'error', 'message': f'删除赞助者凭证失败: {str(e)}'}), 500
+
 @app.route('/api/sponsor', methods=['GET'])
 def get_gold_sponsors():
     """获取金牌赞助商信息（代理请求解决CORS问题）"""
