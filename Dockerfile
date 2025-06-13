@@ -249,8 +249,10 @@ RUN npm run build && \
 # 复制后端代码
 COPY --chown=steam:steam ./server /home/steam/server
 RUN chmod +x /home/steam/server/start_web.sh
+RUN chmod +x /home/steam/server/signal_handler.sh
 
 
 # 设置工作目录和启动命令
 WORKDIR /home/steam
-CMD ["/home/steam/start_web.sh"]
+# 使用信号处理包装脚本确保能够正确处理Docker信号
+ENTRYPOINT ["/home/steam/server/signal_handler.sh", "/home/steam/start_web.sh"]
