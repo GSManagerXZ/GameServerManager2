@@ -4384,35 +4384,6 @@ const App: React.FC = () => {
           setAccountModalVisible(false);
           setPendingInstallGame(null);
         }}
-        confirmLoading={accountModalLoading}
-      >
-        <Form form={accountForm}>
-          <Form.Item
-            name="username"
-            label="Steam用户名"
-            rules={[{ required: true, message: '请输入Steam用户名!' }]}
-          >
-            <Input placeholder="请输入Steam用户名" />
-          </Form.Item>
-          <Form.Item
-            name="password"
-            label="Steam密码"
-            rules={[{ required: true, message: '请输入Steam密码!' }]}
-          >
-            <Input.Password placeholder="请输入Steam密码" />
-           </Form.Item>
-         </Form>
-       </Modal>
-
-      {/* 账号输入Modal */}
-      <Modal
-        title="输入Steam账号"
-        open={accountModalVisible}
-        onOk={onAccountModalOk}
-        onCancel={() => {
-          setAccountModalVisible(false);
-          setPendingInstallGame(null);
-        }}
         okText="安装"
         cancelText="取消"
       >
