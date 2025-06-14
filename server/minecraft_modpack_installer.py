@@ -361,10 +361,71 @@ exec "$JAVA_EXECUTABLE" $JVM_ARGS -jar "$SERVER_JAR" nogui
             update_progress(85, "正在查找服务器JAR文件...")
             server_jar = self.find_server_jar(install_dir)
             if not server_jar:
-                return {
-                    'success': False,
-                    'message': '未找到服务器JAR文件，请手动配置'
-                }
+                # 尝试自动下载服务器核心文件
+                update_progress(87, "未找到服务器JAR文件，正在下载服务器核心...")
+                game_versions = version_data.get('game_versions', [])
+                if game_versions:
+                    minecraft_version = game_versions[0]  # 使用第一个支持的版本
+                    
+                    # 检查整合包依赖，确定加载器类型
+                    dependencies = index_data.get('dependencies', {})
+                    loader_type = None
+                    loader_version = None
+                    
+                    if 'fabric-loader' in dependencies:
+                        loader_type = 'fabric'
+                        loader_version = dependencies['fabric-loader']
+                    elif 'quilt-loader' in dependencies:
+                        loader_type = 'quilt'
+                        loader_version = dependencies['quilt-loader']
+                    elif 'forge' in dependencies:
+                        loader_type = 'forge'
+                        loader_version = dependencies['forge']
+                    elif 'neoforge' in dependencies:
+                        loader_type = 'neoforge'
+                        loader_version = dependencies['neoforge']
+                    
+                    if loader_type and loader_version:
+                        # 下载对应的加载器JAR文件
+                        print(f"正在下载 {loader_type} 服务器核心 (MC版本: {minecraft_version}, 加载器版本: {loader_version})")
+                        download_result = self.cli.download_loader_jar(loader_type, minecraft_version, loader_version)
+                        if download_result:
+                            # 复制到安装目录根目录
+                            server_jar_name = f"{loader_type}-server-{minecraft_version}-{loader_version}.jar"
+                            server_jar_path = os.path.join(install_dir, server_jar_name)
+                            shutil.copy2(download_result["file_path"], server_jar_path)
+                            server_jar = server_jar_path
+                            print(f"✅ 已下载 {loader_type} 服务器核心: {server_jar_name}")
+                            update_progress(89, f"已下载 {loader_type} 服务器核心")
+                        else:
+                            print(f"❌ 下载 {loader_type} 服务器核心失败")
+                    
+                    if not server_jar:
+                        # 如果仍然没有找到，尝试下载原版服务器
+                        print(f"未找到加载器核心，正在尝试下载原版Minecraft服务器 (版本: {minecraft_version})")
+                        update_progress(88, "正在下载原版Minecraft服务器...")
+                        try:
+                            from MCdownloads import download_file
+                            server_jar_name = f"minecraft-server-{minecraft_version}.jar"
+                            server_jar_path = os.path.join(install_dir, server_jar_name)
+                            
+                            # 这里需要实现原版服务器下载逻辑
+                            # 暂时创建一个提示文件
+                            info_file_path = server_jar_path.replace('.jar', '_download_info.txt')
+                            with open(info_file_path, 'w', encoding='utf-8') as f:
+                                f.write(f"请手动下载 Minecraft {minecraft_version} 服务器JAR文件\n")
+                                f.write(f"下载地址: https://www.minecraft.net/en-us/download/server\n")
+                                f.write(f"将文件重命名为: {server_jar_name}\n")
+                                f.write(f"并放置在: {install_dir}\n")
+                            print(f"⚠️  已创建下载提示文件: {os.path.basename(info_file_path)}")
+                        except Exception as e:
+                            print(f"❌ 创建提示文件失败: {str(e)}")
+                
+                if not server_jar:
+                    return {
+                        'success': False,
+                        'message': f'未找到服务器JAR文件。请手动下载对应版本的服务器核心文件到 files 目录中。支持的游戏版本: {", ".join(game_versions) if game_versions else "未知"}'
+                    }
             
             # 获取游戏版本信息
             game_versions = version_data.get('game_versions', [])
@@ -384,6 +445,38 @@ exec "$JAVA_EXECUTABLE" $JVM_ARGS -jar "$SERVER_JAR" nogui
             # 创建EULA文件
             update_progress(95, "正在创建EULA文件...")
             self.create_eula_file(install_dir)
+            
+            # 将files文件夹内容移动到根目录
+            update_progress(92, "正在整理文件结构...")
+            files_dir = os.path.join(install_dir, "files")
+            if os.path.exists(files_dir):
+                print("正在将files文件夹内容移动到根目录...")
+                # 移动files文件夹中的所有内容到根目录
+                for item in os.listdir(files_dir):
+                    src_path = os.path.join(files_dir, item)
+                    dst_path = os.path.join(install_dir, item)
+                    
+                    # 如果目标已存在，先删除
+                    if os.path.exists(dst_path):
+                        if os.path.isdir(dst_path):
+                            shutil.rmtree(dst_path)
+                        else:
+                            os.remove(dst_path)
+                    
+                    # 移动文件或文件夹
+                    shutil.move(src_path, dst_path)
+                    print(f"已移动: {item}")
+                
+                # 删除空的files文件夹
+                if os.path.exists(files_dir) and not os.listdir(files_dir):
+                    os.rmdir(files_dir)
+                    print("已删除空的files文件夹")
+                
+                # 更新server_jar路径
+                if server_jar and "files" in server_jar:
+                    server_jar = server_jar.replace(os.path.join(install_dir, "files"), install_dir)
+                    server_jar = server_jar.replace("files/", "")
+                    server_jar = server_jar.replace("files\\", "")
             
             # 设置目录权限
             update_progress(97, "正在设置目录权限...")
@@ -424,35 +517,57 @@ exec "$JAVA_EXECUTABLE" $JVM_ARGS -jar "$SERVER_JAR" nogui
     
     def find_server_jar(self, install_dir: str) -> Optional[str]:
         """查找服务器JAR文件"""
-        files_dir = os.path.join(install_dir, "files")
-        
-        if not os.path.exists(files_dir):
-            return None
-        
         # 常见的服务器JAR文件名模式
         server_patterns = [
             'server.jar',
             'minecraft_server.jar',
-            'forge-*-universal.jar',
-            'forge-*-installer.jar',
-            'fabric-server-launch.jar',
-            'quilt-server-launch.jar'
+            'minecraft-server',
+            'forge-',
+            'fabric-',
+            'quilt-',
+            'neoforge-'
         ]
         
-        # 搜索服务器JAR文件
-        for root, dirs, files in os.walk(files_dir):
-            for file in files:
-                if file.endswith('.jar'):
-                    file_lower = file.lower()
-                    if any(pattern.replace('*', '') in file_lower for pattern in server_patterns):
-                        return os.path.join(root, file)
+        # 首先在根目录查找
+        print(f"正在根目录查找服务器JAR文件: {install_dir}")
+        for file in os.listdir(install_dir):
+            if file.endswith('.jar'):
+                file_lower = file.lower()
+                if any(pattern in file_lower for pattern in server_patterns):
+                    jar_path = os.path.join(install_dir, file)
+                    print(f"✅ 在根目录找到服务器JAR: {file}")
+                    return jar_path
         
-        # 如果没找到特定的服务器JAR，返回第一个JAR文件
-        for root, dirs, files in os.walk(files_dir):
-            for file in files:
-                if file.endswith('.jar'):
-                    return os.path.join(root, file)
+        # 然后在files目录查找（如果存在）
+        files_dir = os.path.join(install_dir, "files")
+        if os.path.exists(files_dir):
+            print(f"正在files目录查找服务器JAR文件: {files_dir}")
+            for root, dirs, files in os.walk(files_dir):
+                for file in files:
+                    if file.endswith('.jar'):
+                        file_lower = file.lower()
+                        if any(pattern in file_lower for pattern in server_patterns):
+                            jar_path = os.path.join(root, file)
+                            print(f"✅ 在files目录找到服务器JAR: {file}")
+                            return jar_path
         
+        # 如果没找到特定的服务器JAR，返回根目录第一个JAR文件
+        for file in os.listdir(install_dir):
+            if file.endswith('.jar'):
+                jar_path = os.path.join(install_dir, file)
+                print(f"✅ 找到JAR文件: {file}")
+                return jar_path
+        
+        # 最后在files目录找任意JAR文件
+        if os.path.exists(files_dir):
+            for root, dirs, files in os.walk(files_dir):
+                for file in files:
+                    if file.endswith('.jar'):
+                        jar_path = os.path.join(root, file)
+                        print(f"✅ 在files目录找到JAR文件: {file}")
+                        return jar_path
+        
+        print("❌ 未找到任何JAR文件")
         return None
     
     def run_interactive_install(self):

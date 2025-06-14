@@ -67,6 +67,25 @@ class DownloadManager:
         self.max_workers = max_workers
         self.status = DownloadStatus()
         self.stop_event = threading.Event()
+        
+        # 创建共享的 Session 以复用连接
+        self.session = requests.Session()
+        
+        # 配置连接池适配器
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=max_workers,
+            pool_maxsize=max_workers * 2,
+            max_retries=requests.adapters.Retry(
+                total=3,
+                backoff_factor=0.3,
+                status_forcelist=[500, 502, 503, 504]
+            )
+        )
+        self.session.mount('http://', adapter)
+        self.session.mount('https://', adapter)
+        
+        # 设置默认超时
+        self.session.timeout = 30
     
     def download_file(self, url, save_path, headers=None):
         """下载单个文件"""
@@ -81,8 +100,8 @@ class DownloadManager:
             # 确保目录存在
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             
-            # 发送请求
-            response = requests.get(url, headers=headers, stream=True)
+            # 使用共享的 session 发送请求
+            response = self.session.get(url, headers=headers, stream=True, timeout=30)
             response.raise_for_status()
             
             # 获取文件大小
@@ -92,8 +111,10 @@ class DownloadManager:
             with open(save_path, 'wb') as f:
                 if total_size > 0:
                     downloaded = 0
-                    for chunk in response.iter_content(chunk_size=8192):
+                    # 使用更大的chunk_size提高效率
+                    for chunk in response.iter_content(chunk_size=32768):
                         if self.stop_event.is_set():
+                            response.close()
                             return False
                         if chunk:
                             f.write(chunk)
@@ -102,12 +123,19 @@ class DownloadManager:
                             self.status.current_progress = progress
                 else:
                     # 如果没有文件大小信息，直接写入
-                    f.write(response.content)
+                    for chunk in response.iter_content(chunk_size=32768):
+                        if self.stop_event.is_set():
+                            response.close()
+                            return False
+                        if chunk:
+                            f.write(chunk)
             
+            response.close()
             self.status.update(success=True)
             return True
             
         except Exception as e:
+            print(f"下载失败 {url}: {str(e)}")
             self.status.update(success=False)
             return False
     
@@ -149,6 +177,12 @@ class DownloadManager:
         print(f"\n\n✅ 下载完成: 成功 {self.status.success}/{self.status.total}, 失败 {self.status.failed}")
         return self.status.failed == 0
     
+    def close(self):
+        """关闭下载管理器，清理资源"""
+        if hasattr(self, 'session'):
+            self.session.close()
+        self.stop_event.set()
+    
     def _display_progress(self):
         """显示下载进度"""
         while not self.stop_event.is_set():
@@ -186,11 +220,16 @@ class MinecraftLoaderCLI:
         self.api = MinecraftLoaderAPI()
         self.download_dir = os.path.join(os.getcwd(), "downloads")
         self.modpack_dir = os.path.join(os.getcwd(), "modpacks")
-        self.download_manager = DownloadManager(max_workers=8)  # 创建下载管理器，最多8个线程
+        self.download_manager = DownloadManager(max_workers=6)  # 创建下载管理器，最多6个线程
         
         # 确保下载目录存在
         os.makedirs(self.download_dir, exist_ok=True)
         os.makedirs(self.modpack_dir, exist_ok=True)
+    
+    def __del__(self):
+        """析构函数，清理资源"""
+        if hasattr(self, 'download_manager'):
+            self.download_manager.close()
         
     def print_banner(self):
         """打印程序横幅"""
@@ -1058,11 +1097,22 @@ class MinecraftLoaderCLI:
         
         # 准备下载任务列表
         download_tasks = []
+        skipped_client_only = 0
+        
         for file_info in files:
             # 获取文件路径和文件名
             file_path = file_info.get("path", "")
             if not file_path:
                 continue
+            
+            # 检查环境配置，过滤仅客户端文件
+            env_config = file_info.get("env", {})
+            if env_config:
+                server_support = env_config.get("server", "required")
+                # 如果服务器端不支持此文件，跳过下载
+                if server_support == "unsupported":
+                    skipped_client_only += 1
+                    continue
                 
             # 创建保存路径
             save_path = os.path.join(files_dir, file_path)
@@ -1075,6 +1125,9 @@ class MinecraftLoaderCLI:
             
             if download_url:
                 download_tasks.append((download_url, save_path, headers))
+        
+        if skipped_client_only > 0:
+            print(f"已跳过 {skipped_client_only} 个仅客户端文件")
         
         if not download_tasks:
             print("❌ 没有可下载的文件")
@@ -1105,6 +1158,9 @@ class MinecraftLoaderCLI:
                     time.sleep(0.5)
             
             self.download_manager._display_progress = custom_display
+        
+        # 重置下载管理器的停止事件
+        self.download_manager.stop_event.clear()
         
         result = self.download_manager.download_files(download_tasks)
         
