@@ -357,75 +357,83 @@ exec "$JAVA_EXECUTABLE" $JVM_ARGS -jar "$SERVER_JAR" nogui
             update_progress(80, "正在处理配置文件...")
             self.cli.process_modpack_overrides(install_dir)
             
-            # 查找服务器JAR文件
-            update_progress(85, "正在查找服务器JAR文件...")
-            server_jar = self.find_server_jar(install_dir)
-            if not server_jar:
-                # 尝试自动下载服务器核心文件
-                update_progress(87, "未找到服务器JAR文件，正在下载服务器核心...")
-                game_versions = version_data.get('game_versions', [])
-                if game_versions:
-                    minecraft_version = game_versions[0]  # 使用第一个支持的版本
-                    
-                    # 检查整合包依赖，确定加载器类型
-                    dependencies = index_data.get('dependencies', {})
-                    loader_type = None
-                    loader_version = None
-                    
-                    if 'fabric-loader' in dependencies:
-                        loader_type = 'fabric'
-                        loader_version = dependencies['fabric-loader']
-                    elif 'quilt-loader' in dependencies:
-                        loader_type = 'quilt'
-                        loader_version = dependencies['quilt-loader']
-                    elif 'forge' in dependencies:
-                        loader_type = 'forge'
-                        loader_version = dependencies['forge']
-                    elif 'neoforge' in dependencies:
-                        loader_type = 'neoforge'
-                        loader_version = dependencies['neoforge']
-                    
-                    if loader_type and loader_version:
-                        # 下载对应的加载器JAR文件
-                        print(f"正在下载 {loader_type} 服务器核心 (MC版本: {minecraft_version}, 加载器版本: {loader_version})")
-                        download_result = self.cli.download_loader_jar(loader_type, minecraft_version, loader_version)
-                        if download_result:
-                            # 复制到安装目录根目录
-                            server_jar_name = f"{loader_type}-server-{minecraft_version}-{loader_version}.jar"
-                            server_jar_path = os.path.join(install_dir, server_jar_name)
-                            shutil.copy2(download_result["file_path"], server_jar_path)
-                            server_jar = server_jar_path
-                            print(f"✅ 已下载 {loader_type} 服务器核心: {server_jar_name}")
-                            update_progress(89, f"已下载 {loader_type} 服务器核心")
-                        else:
-                            print(f"❌ 下载 {loader_type} 服务器核心失败")
-                    
-                    if not server_jar:
-                        # 如果仍然没有找到，尝试下载原版服务器
-                        print(f"未找到加载器核心，正在尝试下载原版Minecraft服务器 (版本: {minecraft_version})")
-                        update_progress(88, "正在下载原版Minecraft服务器...")
-                        try:
-                            from MCdownloads import download_file
-                            server_jar_name = f"minecraft-server-{minecraft_version}.jar"
-                            server_jar_path = os.path.join(install_dir, server_jar_name)
-                            
-                            # 这里需要实现原版服务器下载逻辑
-                            # 暂时创建一个提示文件
-                            info_file_path = server_jar_path.replace('.jar', '_download_info.txt')
-                            with open(info_file_path, 'w', encoding='utf-8') as f:
-                                f.write(f"请手动下载 Minecraft {minecraft_version} 服务器JAR文件\n")
-                                f.write(f"下载地址: https://www.minecraft.net/en-us/download/server\n")
-                                f.write(f"将文件重命名为: {server_jar_name}\n")
-                                f.write(f"并放置在: {install_dir}\n")
-                            print(f"⚠️  已创建下载提示文件: {os.path.basename(info_file_path)}")
-                        except Exception as e:
-                            print(f"❌ 创建提示文件失败: {str(e)}")
+            # 直接下载服务器核心文件
+            update_progress(85, "正在下载服务器核心文件...")
+            game_versions = version_data.get('game_versions', [])
+            server_jar = None
+            
+            if game_versions:
+                minecraft_version = game_versions[0]  # 使用第一个支持的版本
+                
+                # 检查整合包依赖，确定加载器类型
+                dependencies = index_data.get('dependencies', {})
+                loader_type = None
+                loader_version = None
+                
+                if 'fabric-loader' in dependencies:
+                    loader_type = 'fabric'
+                    loader_version = dependencies['fabric-loader']
+                elif 'quilt-loader' in dependencies:
+                    loader_type = 'quilt'
+                    loader_version = dependencies['quilt-loader']
+                elif 'forge' in dependencies:
+                    loader_type = 'forge'
+                    loader_version = dependencies['forge']
+                elif 'neoforge' in dependencies:
+                    loader_type = 'neoforge'
+                    loader_version = dependencies['neoforge']
+                
+                if loader_type and loader_version:
+                    # 下载对应的加载器JAR文件
+                    print(f"正在下载 {loader_type} 服务器核心 (MC版本: {minecraft_version}, 加载器版本: {loader_version})")
+                    download_result = self.cli.download_loader_jar(loader_type, minecraft_version, loader_version)
+                    if download_result:
+                        # 复制到安装目录根目录
+                        server_jar_name = f"{loader_type}-server-{minecraft_version}-{loader_version}.jar"
+                        server_jar_path = os.path.join(install_dir, server_jar_name)
+                        shutil.copy2(download_result["file_path"], server_jar_path)
+                        server_jar = server_jar_path
+                        print(f"✅ 已下载 {loader_type} 服务器核心: {server_jar_name}")
+                        update_progress(87, f"已下载 {loader_type} 服务器核心")
+                    else:
+                        print(f"❌ 下载 {loader_type} 服务器核心失败")
                 
                 if not server_jar:
-                    return {
-                        'success': False,
-                        'message': f'未找到服务器JAR文件。请手动下载对应版本的服务器核心文件到 files 目录中。支持的游戏版本: {", ".join(game_versions) if game_versions else "未知"}'
-                    }
+                    # 如果没有加载器，直接下载原版服务器
+                    print(f"正在下载原版Minecraft服务器 (版本: {minecraft_version})")
+                    update_progress(88, "正在下载原版Minecraft服务器...")
+                    try:
+                        from MCdownloads import download_file
+                        server_jar_name = f"minecraft-server-{minecraft_version}.jar"
+                        server_jar_path = os.path.join(install_dir, server_jar_name)
+                        
+                        # 这里需要实现原版服务器下载逻辑
+                        # 暂时创建一个提示文件
+                        info_file_path = server_jar_path.replace('.jar', '_download_info.txt')
+                        with open(info_file_path, 'w', encoding='utf-8') as f:
+                            f.write(f"请手动下载 Minecraft {minecraft_version} 服务器JAR文件\n")
+                            f.write(f"下载地址: https://www.minecraft.net/en-us/download/server\n")
+                            f.write(f"将文件重命名为: {server_jar_name}\n")
+                            f.write(f"并放置在: {install_dir}\n")
+                        print(f"⚠️  已创建下载提示文件: {os.path.basename(info_file_path)}")
+                        server_jar = info_file_path  # 设置为提示文件路径，表示已处理
+                    except Exception as e:
+                        print(f"❌ 创建提示文件失败: {str(e)}")
+            
+            if not server_jar:
+                return {
+                    'success': False,
+                    'message': f'下载服务器核心文件失败。支持的游戏版本: {", ".join(game_versions) if game_versions else "未知"}'
+                }
+            
+            # 如果下载的是提示文件，需要重新查找实际的JAR文件
+            if server_jar.endswith('_download_info.txt'):
+                actual_server_jar = self.find_server_jar(install_dir)
+                if actual_server_jar:
+                    server_jar = actual_server_jar
+                else:
+                    # 使用预期的JAR文件名
+                    server_jar = server_jar.replace('_download_info.txt', '.jar')
             
             # 获取游戏版本信息
             game_versions = version_data.get('game_versions', [])
