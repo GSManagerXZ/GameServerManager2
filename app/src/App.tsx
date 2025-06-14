@@ -28,6 +28,7 @@ import Settings from './pages/Settings'; // 导入设置页面
 import Environment from './pages/Environment'; // 导入环境安装页面
 import ServerGuide from './pages/ServerGuide'; // 导入开服指南页面
 import PanelManager from './components/PanelManager'; // 导入面板管理组件
+import MinecraftModpackDeploy from './components/MinecraftModpackDeploy'; // 导入Minecraft整合包部署组件
 import { fetchGames, installGame, terminateInstall, installByAppId, openGameFolder, checkVersionUpdate, downloadDockerImage } from './api';
 import { GameInfo } from './types';
 import terminalService from './services/terminalService';
@@ -3560,6 +3561,11 @@ const App: React.FC = () => {
                     <Card title="Minecraft服务器快速部署">
                       <MinecraftDeploy />
                     </Card>
+                  </div>
+                </TabPane>
+                <TabPane tab="Minecraft整合包部署" key="minecraft-modpack-deploy">
+                  <div style={{ maxWidth: 1200, margin: '0 auto', padding: '20px 0' }}>
+                    <MinecraftModpackDeploy />
                   </div>
                 </TabPane>
                 <TabPane tab="半自动部署" key="semi-auto-deploy">
