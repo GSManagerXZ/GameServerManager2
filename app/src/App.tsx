@@ -3157,7 +3157,7 @@ const App: React.FC = () => {
               style={{ fontSize: '16px', padding: '0 8px' }}
             />
             <div className="header-title">
-              GameServerManager
+              <img src="/logo/logo.png" alt="GameServerManager" style={{ height: '32px', objectFit: 'contain' }} />
             </div>
             <div className="user-info">
               <Tooltip title={enableRandomBackground ? "关闭随机背景" : "开启随机背景"}>
@@ -3205,7 +3205,7 @@ const App: React.FC = () => {
             bodyStyle={{ padding: 0 }}
           >
             <div className="logo">
-              <CloudServerOutlined /> <span>GSManager</span>
+              <img src="/logo/logo2.png" alt="GSManager" style={{ height: '50px', objectFit: 'contain' }} />
             </div>
             <Menu
               theme="light"
@@ -3281,7 +3281,7 @@ const App: React.FC = () => {
         collapsedWidth="var(--sider-collapsed-width)"
       >
         <div className="logo">
-          <CloudServerOutlined /> {!collapsed && <span>GSManager</span>}
+          <img src="/logo/logo2.png" alt="GSManager" style={{ height: '50px', objectFit: 'contain' }} />
         </div>
         <Menu
           theme="light"
@@ -3351,7 +3351,7 @@ const App: React.FC = () => {
         {!isMobile && (
         <Header className="site-header">
           <div className="header-title">
-            GameServerManager
+            <img src="/logo/logo.png" alt="GameServerManager" style={{ height: '60px', width: '200px', objectFit: 'contain' }} />
           </div>
           <div className="user-info">
             <Tooltip title={enableRandomBackground ? "关闭随机背景" : "开启随机背景"}>
