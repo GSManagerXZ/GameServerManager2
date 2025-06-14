@@ -174,7 +174,7 @@ const MinecraftModpackDeploy: React.FC = () => {
 
     setDeploying(true);
     setDeployProgress(0);
-    setDeployMessage('正在启动部署...');
+    setDeployMessage('正在努力整理整合包信息...');
     
     try {
       // 启动部署
@@ -539,7 +539,7 @@ const MinecraftModpackDeploy: React.FC = () => {
                 }}
               >
                 <Form.Item
-                  label="安装文件夹名称"
+                  label="安装文件夹名称(请使用英文字符)"
                   name="folder_name"
                   rules={[
                     { required: true, message: '请输入文件夹名称' },
@@ -622,10 +622,11 @@ const MinecraftModpackDeploy: React.FC = () => {
             message="部署说明"
             description={
               <div>
-                <p>• 整合包将自动下载并安装到 /home/steam/games/{'{文件夹名称}'}</p>
-                <p>• 系统会自动创建启动脚本和必要的配置文件</p>
+                <p>• 整合包文件下载需要一定的时间，请耐心等待。下载到最后几个文件卡住属于正常现象。您可以切换到其它页面程序将会在后台继续完成下载。</p>
+                <p>• 系统会自动创建启动脚本和下载核心文件</p>
+                <p>• 一些核心文件可能存在问题，启动失败建议您从“Minecraft部署”中重新下载核心到服务端，然后修改启动脚本中的核心名称即可。</p>
                 <p>• 部署完成后可在游戏管理页面启动服务器</p>
-                <p>• 首次启动可能需要较长时间来生成世界</p>
+                <p>• 若启动报错可发给AI进行判断。若报错存在HTTP字眼则代表网络问题，您需要使用代理模式</p>
               </div>
             }
             type="info"

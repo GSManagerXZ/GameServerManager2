@@ -343,7 +343,7 @@ exec "$JAVA_EXECUTABLE" $JVM_ARGS -jar "$SERVER_JAR" nogui
             # 下载整合包中的所有文件
             update_progress(35, "正在下载整合包内容...")
             download_success = self.cli.download_modpack_files(index_data, install_dir, 
-                lambda p, msg: update_progress(35 + int(p * 0.4), f"下载进度: {msg}"))
+                lambda p, msg: update_progress(35 + int(p * 0.4), f"下载: {msg}"))
             
             if not download_success:
                 return {
