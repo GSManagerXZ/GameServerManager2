@@ -331,6 +331,9 @@ const MinecraftDeploy: React.FC = () => {
   const [deploying, setDeploying] = useState<boolean>(false);
   const [installedJdks, setInstalledJdks] = useState<any[]>([]);
   const [selectedJdk, setSelectedJdk] = useState<string>('');
+  const [deployMode, setDeployMode] = useState<string>('new'); // 新增部署模式状态
+  const [installedGames, setInstalledGames] = useState<any[]>([]); // 已安装游戏列表
+  const [selectedExistingServer, setSelectedExistingServer] = useState<string>(''); // 选择的现有服务端
 
   // 获取MC服务端列表
   const fetchMcServers = async () => {
@@ -403,6 +406,22 @@ const MinecraftDeploy: React.FC = () => {
     }
   };
 
+  // 获取已安装游戏列表
+  const fetchInstalledGames = async () => {
+    try {
+      const response = await axios.get('/api/installed_games');
+      if (response.data.status === 'success') {
+        // 合并已安装游戏和外部游戏
+        const allGames = [...(response.data.installed || []), ...(response.data.external || [])];
+        setInstalledGames(allGames);
+      } else {
+        message.error(response.data.message || '获取已安装游戏列表失败');
+      }
+    } catch (error: any) {
+      message.error('获取已安装游戏列表失败: ' + (error.response?.data?.message || error.message));
+    }
+  };
+
   // 部署服务器
   const deployServer = async () => {
     if (!selectedServer || !selectedMcVersion || !selectedBuild) {
@@ -410,20 +429,29 @@ const MinecraftDeploy: React.FC = () => {
       return;
     }
 
-    if (!customName.trim()) {
-      message.error('请输入服务器名称');
+    // 根据部署模式验证服务器名称
+    const serverName = deployMode === 'existing' ? selectedExistingServer : customName;
+    if (!serverName || !serverName.trim()) {
+      message.error(deployMode === 'existing' ? '请选择现有服务端' : '请输入服务器名称');
       return;
     }
 
     try {
       setDeploying(true);
-      const response = await axios.post('/api/minecraft/deploy', {
+      const deployData: any = {
         server_name: selectedServer,
         mc_version: selectedMcVersion,
         core_version: selectedBuild,
-        custom_name: customName.trim(),
-        selected_jdk: selectedJdk
-      });
+        custom_name: serverName.trim(),
+        deploy_mode: deployMode
+      };
+      
+      // 只有在新建服务端模式下才传递JDK参数
+      if (deployMode === 'new') {
+        deployData.selected_jdk = selectedJdk;
+      }
+      
+      const response = await axios.post('/api/minecraft/deploy', deployData);
 
       if (response.data.status === 'success') {
         message.success('Minecraft服务器部署成功!');
@@ -442,6 +470,7 @@ const MinecraftDeploy: React.FC = () => {
         setSelectedMcVersion('');
         setSelectedBuild('');
         setCustomName('');
+        setSelectedExistingServer('');
         setMcVersions([]);
         setBuilds([]);
       } else {
@@ -469,15 +498,41 @@ const MinecraftDeploy: React.FC = () => {
     }
   };
 
-  // 组件挂载时获取服务端列表和JDK列表
+  // 组件挂载时获取服务端列表、JDK列表和已安装游戏列表
   React.useEffect(() => {
     fetchMcServers();
     fetchInstalledJdks();
+    fetchInstalledGames();
   }, []);
+
+  // 当部署模式改变时，重置相关状态
+  React.useEffect(() => {
+    if (deployMode === 'existing') {
+      setCustomName('');
+    } else {
+      setSelectedExistingServer('');
+    }
+  }, [deployMode]);
 
   return (
     <div>
       <Row gutter={[16, 16]}>
+        <Col span={24}>
+          <Title level={4}>部署模式</Title>
+          <Select
+            style={{ width: '100%' }}
+            placeholder="请选择部署模式"
+            value={deployMode}
+            onChange={setDeployMode}
+          >
+            <Option value="new">新建服务端</Option>
+            <Option value="existing">部署到现有服务端中</Option>
+          </Select>
+          <div style={{ marginTop: '8px', color: '#666', fontSize: '12px' }}>
+            {deployMode === 'new' ? '创建新的服务端实例，包含完整的启动配置' : '仅下载服务端核心文件到现有目录，不生成启动脚本'}
+          </div>
+        </Col>
+        
         <Col span={24}>
           <Title level={4}>选择服务端类型</Title>
           <Select
@@ -546,19 +601,46 @@ const MinecraftDeploy: React.FC = () => {
 
         {selectedBuild && (
           <Col span={24}>
-            <Title level={4} style={{ padding: '50px' }}>服务器名称</Title>
-            <Input
-              placeholder="请输入服务器名称（将作为目录名）"
-              value={customName}
-              onChange={(e) => setCustomName(e.target.value)}
-            />
-            <div style={{ marginTop: '8px', color: '#666', fontSize: '12px' }}>
-              服务器将部署到: /home/steam/games/{customName || '服务器名称'}
-            </div>
+            {deployMode === 'new' ? (
+              <>
+                <Title level={4}>服务器名称</Title>
+                <Input
+                  placeholder="请输入服务器名称（将作为目录名）"
+                  value={customName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                />
+                <div style={{ marginTop: '8px', color: '#666', fontSize: '12px' }}>
+                  服务器将部署到: /home/steam/games/{customName || '服务器名称'}
+                </div>
+              </>
+            ) : (
+              <>
+                <Title level={4}>选择现有服务端</Title>
+                <Select
+                  style={{ width: '100%' }}
+                  placeholder="请选择要部署到的现有服务端"
+                  value={selectedExistingServer}
+                  onChange={setSelectedExistingServer}
+                  loading={loading}
+                >
+                  {installedGames.map(game => (
+                    <Option key={game.id || game} value={game.id || game}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>{game.name || game}</span>
+                        {game.external && <Tag color="orange">外部游戏</Tag>}
+                      </div>
+                    </Option>
+                  ))}
+                </Select>
+                <div style={{ marginTop: '8px', color: '#666', fontSize: '12px' }}>
+                  核心文件将下载到: /home/steam/games/{selectedExistingServer || '选择的服务端'}
+                </div>
+              </>
+            )}
           </Col>
         )}
 
-        {customName && (
+        {deployMode === 'new' && customName && (
           <Col span={24}>
             <Title level={4}>Java环境选择</Title>
             <Select
@@ -587,11 +669,14 @@ const MinecraftDeploy: React.FC = () => {
           </Col>
         )}
 
-        {selectedServer && selectedMcVersion && selectedBuild && customName && (
+        {selectedServer && selectedMcVersion && selectedBuild && ((deployMode === 'new' && customName) || (deployMode === 'existing' && selectedExistingServer)) && (
           <Col span={24}>
             <Card style={{ backgroundColor: '#f6f8fa', border: '1px solid #d1d9e0' }}>
               <Title level={5}>部署信息确认</Title>
               <Row gutter={[16, 8]}>
+                <Col span={12}>
+                  <strong>部署模式:</strong> {deployMode === 'new' ? '新建服务端' : '部署到现有服务端中'}
+                </Col>
                 <Col span={12}>
                   <strong>服务端类型:</strong> {selectedServer}
                 </Col>
@@ -602,11 +687,13 @@ const MinecraftDeploy: React.FC = () => {
                   <strong>构建版本:</strong> {selectedBuild}
                 </Col>
                 <Col span={12}>
-                  <strong>服务器名称:</strong> {customName}
+                  <strong>服务器名称:</strong> {deployMode === 'new' ? customName : selectedExistingServer}
                 </Col>
-                <Col span={12}>
-                  <strong>Java环境:</strong> {selectedJdk ? installedJdks.find(jdk => jdk.id === selectedJdk)?.name || selectedJdk : '系统默认Java'}
-                </Col>
+                {deployMode === 'new' && (
+                  <Col span={12}>
+                    <strong>Java环境:</strong> {selectedJdk ? installedJdks.find(jdk => jdk.id === selectedJdk)?.name || selectedJdk : '系统默认Java'}
+                  </Col>
+                )}
               </Row>
               <div style={{ marginTop: '16px', textAlign: 'center' }}>
                 <Button

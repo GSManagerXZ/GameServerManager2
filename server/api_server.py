@@ -8316,6 +8316,7 @@ def deploy_minecraft_server():
         core_version = data.get('core_version')
         custom_name = data.get('custom_name', server_name)
         selected_jdk = data.get('selected_jdk')  # 新增JDK选择参数
+        deploy_mode = data.get('deploy_mode', 'new')  # 新增部署模式参数，默认为新建
         
         if not all([server_name, mc_version, core_version]):
             return jsonify({
@@ -8323,9 +8324,9 @@ def deploy_minecraft_server():
                 'message': '缺少必要参数: server_name, mc_version, core_version'
             }), 400
         
-        # 确定Java可执行文件路径
+        # 确定Java可执行文件路径（仅在新建模式下需要）
         java_executable = 'java'  # 默认使用系统Java
-        if selected_jdk:
+        if deploy_mode == 'new' and selected_jdk:
             if selected_jdk in JAVA_VERSIONS:
                 installed, _ = check_java_installation(selected_jdk)
                 if installed:
@@ -8373,41 +8374,54 @@ def deploy_minecraft_server():
                     f.write(chunk)
                     downloaded += len(chunk)
         
-        # 创建启动脚本，使用选择的JDK
-        start_script_content = f"""#!/bin/bash
+        # 只有在新建模式下才创建启动脚本和配置文件
+        if deploy_mode == 'new':
+            # 创建启动脚本，使用选择的JDK
+            start_script_content = f"""#!/bin/bash
 cd "$(dirname "$0")"
 {java_executable} -Xmx2G -Xms1G -jar {filename} nogui
 """
-        
-        start_script_path = os.path.join(game_dir, 'start.sh')
-        with open(start_script_path, 'w') as f:
-            f.write(start_script_content)
-        
-        # 设置执行权限
-        os.chmod(start_script_path, 0o755)
-        
-        # 创建eula.txt文件
-        eula_path = os.path.join(game_dir, 'eula.txt')
-        with open(eula_path, 'w') as f:
-            f.write('eula=true\n')
+            
+            start_script_path = os.path.join(game_dir, 'start.sh')
+            with open(start_script_path, 'w') as f:
+                f.write(start_script_content)
+            
+            # 设置执行权限
+            os.chmod(start_script_path, 0o755)
+            
+            # 创建eula.txt文件
+            eula_path = os.path.join(game_dir, 'eula.txt')
+            with open(eula_path, 'w') as f:
+                f.write('eula=true\n')
         
         # 设置目录权限
         subprocess.run(['chown', '-R', 'steam:steam', game_dir], check=False)
         
-        logger.info(f"Minecraft服务端部署完成: {game_dir}，使用JDK: {java_executable}")
+        if deploy_mode == 'new':
+            logger.info(f"Minecraft服务端部署完成: {game_dir}，使用JDK: {java_executable}")
+            message_text = 'Minecraft服务端部署成功'
+        else:
+            logger.info(f"Minecraft服务端核心文件下载完成: {game_dir}")
+            message_text = 'Minecraft服务端核心文件下载成功'
+        
+        response_data = {
+            'game_dir': game_dir,
+            'filename': filename,
+            'server_name': server_name,
+            'mc_version': mc_version,
+            'core_version': core_version,
+            'deploy_mode': deploy_mode
+        }
+        
+        # 只有在新建模式下才返回JDK相关信息
+        if deploy_mode == 'new':
+            response_data['java_executable'] = java_executable
+            response_data['selected_jdk'] = selected_jdk
         
         return jsonify({
             'status': 'success',
-            'message': f'Minecraft服务端部署成功',
-            'data': {
-                'game_dir': game_dir,
-                'filename': filename,
-                'server_name': server_name,
-                'mc_version': mc_version,
-                'core_version': core_version,
-                'java_executable': java_executable,
-                'selected_jdk': selected_jdk
-            }
+            'message': message_text,
+            'data': response_data
         })
         
     except Exception as e:
