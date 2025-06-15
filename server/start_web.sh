@@ -31,6 +31,9 @@ if [ ! -z "$CUSTOM_RUN_DIR" ] && [ ! -z "$CUSTOM_RUN_SCRIPT" ]; then
     fi
     
     echo "启动自定义脚本: $CUSTOM_RUN_SCRIPT"
+    echo "注意: 自定义脚本将完全接管启动流程"
+    
+    # 使用exec直接替换当前进程，让自定义脚本完全接管
     exec "$CUSTOM_RUN_SCRIPT"
 fi
 
