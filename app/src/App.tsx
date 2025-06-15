@@ -5128,6 +5128,7 @@ const App: React.FC = () => {
           setDirectoryPickerVisible(false);
         }}
         title="选择文件路径"
+        allowFileSelection={true}
       />
       
       {/* 目录选择器 - 定时备份 */}

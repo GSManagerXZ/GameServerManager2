@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Tree, Button, Input, message, Spin } from 'antd';
-import { FolderOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import { FolderOutlined, FolderOpenOutlined, FileOutlined } from '@ant-design/icons';
 import axios from 'axios';
 
 interface DirectoryNode {
@@ -8,6 +8,7 @@ interface DirectoryNode {
   key: string;
   isLeaf?: boolean;
   children?: DirectoryNode[];
+  type?: 'directory' | 'file';
 }
 
 interface DirectoryPickerProps {
@@ -16,6 +17,7 @@ interface DirectoryPickerProps {
   onSelect: (path: string) => void;
   initialPath?: string;
   title?: string;
+  allowFileSelection?: boolean; // 新增：是否允许选择文件
 }
 
 const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
@@ -23,7 +25,8 @@ const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
   onCancel,
   onSelect,
   initialPath = '/home/steam',
-  title = '选择目录'
+  title = '选择目录',
+  allowFileSelection = false
 }) => {
   const [treeData, setTreeData] = useState<DirectoryNode[]>([]);
   const [selectedPath, setSelectedPath] = useState<string>(initialPath);
@@ -36,15 +39,20 @@ const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
     try {
       const response = await axios.get(`/api/list_files?path=${encodeURIComponent(path)}`);
       if (response.data.status === 'success') {
-        const directories = response.data.files
-          .filter((file: any) => file.type === 'directory')
-          .map((dir: any) => ({
-            title: dir.name,
-            key: dir.path,
-            isLeaf: false,
-            children: undefined
-          }));
-        return directories;
+        const items = response.data.files.map((item: any) => ({
+          title: item.name,
+          key: item.path,
+          isLeaf: item.type === 'file',
+          children: item.type === 'directory' ? undefined : null,
+          type: item.type
+        }));
+        
+        // 如果不允许选择文件，则只返回目录
+        if (!allowFileSelection) {
+          return items.filter((item: DirectoryNode) => item.type === 'directory');
+        }
+        
+        return items;
       }
       return [];
     } catch (error) {
@@ -143,7 +151,8 @@ const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
   // 确认选择
   const handleConfirm = async () => {
     if (!selectedPath) {
-      message.warning('请选择一个目录');
+      const selectionType = allowFileSelection ? '文件或目录' : '目录';
+      message.warning(`请选择一个${selectionType}`);
       return;
     }
 
@@ -223,9 +232,12 @@ const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
             onSelect={handleSelect}
             onExpand={onExpand}
             showIcon
-            icon={({ expanded }) => 
-              expanded ? <FolderOpenOutlined /> : <FolderOutlined />
-            }
+            icon={({ expanded, isLeaf, type }) => {
+              if (isLeaf || type === 'file') {
+                return <FileOutlined />;
+              }
+              return expanded ? <FolderOpenOutlined /> : <FolderOutlined />;
+            }}
           />
         )}
       </div>
