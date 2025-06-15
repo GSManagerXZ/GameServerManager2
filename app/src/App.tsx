@@ -19,6 +19,7 @@ import Terminal from './components/Terminal';
 import SimpleServerTerminal from './components/SimpleServerTerminal';
 import ContainerInfo from './components/ContainerInfo';
 import FileManager from './components/FileManager';
+import DirectoryPicker from './components/DirectoryPicker';
 import Register from './components/Register'; // 导入注册组件
 import FrpManager from './components/FrpManager'; // 导入内网穿透组件
 import FrpDocModal from './components/FrpDocModal'; // 导入内网穿透文档弹窗组件
@@ -1142,6 +1143,9 @@ const App: React.FC = () => {
   const [favoriteModalVisible, setFavoriteModalVisible] = useState(false);
   const [editingFavorite, setEditingFavorite] = useState<any>(null);
   const [favoriteForm] = Form.useForm();
+  // 目录选择器状态
+  const [directoryPickerVisible, setDirectoryPickerVisible] = useState(false);
+  const [backupDirectoryPickerVisible, setBackupDirectoryPickerVisible] = useState(false);
   
   // 保存不活动效果设置到localStorage
   useEffect(() => {
@@ -4361,7 +4365,7 @@ const App: React.FC = () => {
                             style={{ borderRadius: '8px', overflow: 'hidden' }}
                           >
                             <div style={{marginBottom: 8}}>
-                              <strong>文件路径(容器绝对路径):</strong>
+                              <strong>文件路径:</strong>
                               <div style={{wordBreak: 'break-all', fontSize: '12px', color: '#666'}}>
                                 {favorite.filePath}
                               </div>
@@ -4775,7 +4779,20 @@ const App: React.FC = () => {
             label="备份目录"
             rules={[{ required: true, message: '请输入要备份的目录路径' }]}
           >
-            <Input placeholder="例如：/home/steam/games/minecraft" />
+            <Input.Group compact>
+              <Form.Item name="directory" noStyle>
+                <Input 
+                  style={{ width: 'calc(100% - 80px)' }}
+                  placeholder="例如：/home/steam/games/minecraft" 
+                />
+              </Form.Item>
+              <Button 
+                style={{ width: 80 }}
+                onClick={() => setBackupDirectoryPickerVisible(true)}
+              >
+                浏览
+              </Button>
+            </Input.Group>
           </Form.Item>
           
           <Form.Item label="备份间隔">
@@ -4918,7 +4935,20 @@ const App: React.FC = () => {
             label="文件路径"
             rules={[{ required: true, message: '请输入文件路径' }]}
           >
-            <Input placeholder="例如：/home/steam/games/minecraft/server.properties" />
+            <Input.Group compact>
+              <Form.Item name="filePath" noStyle>
+                <Input 
+                  style={{ width: 'calc(100% - 80px)' }}
+                  placeholder="例如：/home/steam/games/minecraft/server.properties" 
+                />
+              </Form.Item>
+              <Button 
+                style={{ width: 80 }}
+                onClick={() => setDirectoryPickerVisible(true)}
+              >
+                浏览
+              </Button>
+            </Input.Group>
           </Form.Item>
           
           <Form.Item
@@ -5088,6 +5118,28 @@ const App: React.FC = () => {
           )}
         </div>
       </Modal>
+      
+      {/* 目录选择器 - 收藏文件 */}
+      <DirectoryPicker
+        visible={directoryPickerVisible}
+        onCancel={() => setDirectoryPickerVisible(false)}
+        onSelect={(path) => {
+          favoriteForm.setFieldsValue({ filePath: path });
+          setDirectoryPickerVisible(false);
+        }}
+        title="选择文件路径"
+      />
+      
+      {/* 目录选择器 - 定时备份 */}
+      <DirectoryPicker
+        visible={backupDirectoryPickerVisible}
+        onCancel={() => setBackupDirectoryPickerVisible(false)}
+        onSelect={(path) => {
+          backupForm.setFieldsValue({ directory: path });
+          setBackupDirectoryPickerVisible(false);
+        }}
+        title="选择备份目录"
+      />
     </Layout>
   );
 };

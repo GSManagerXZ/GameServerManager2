@@ -1213,7 +1213,8 @@ def static_files(path):
     try:
         # 如果请求的是API路径，不进行处理，让后续的路由处理
         if path.startswith('api/'):
-            return None
+            from flask import abort
+            abort(404)  # 让Flask继续寻找其他路由
             
         # 检查是否存在对应的静态文件
         file_path = os.path.join('../app/dist', path)
@@ -3289,6 +3290,7 @@ def clean_installation_output(game_id):
 
 # 文件管理相关的API路由
 
+@app.route('/api/list_files', methods=['GET'])
 @app.route('/api/files', methods=['GET'])
 def list_files():
     """列出指定目录下的文件和子目录"""
