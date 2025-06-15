@@ -8856,6 +8856,23 @@ def list_docker_containers():
             'message': f'获取容器列表失败: {str(e)}'
         }), 500
 
+@app.route('/api/docker/images', methods=['GET'])
+@auth_required
+def list_docker_images():
+    """获取所有Docker镜像列表"""
+    try:
+        images = docker_manager.list_images()
+        return jsonify({
+            'status': 'success',
+            'images': images
+        })
+    except Exception as e:
+        logger.error(f"获取镜像列表失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'获取镜像列表失败: {str(e)}'
+        }), 500
+
 @app.route('/api/docker/container/<container_name>', methods=['GET'])
 @auth_required
 def get_docker_container_info(container_name):
@@ -8945,6 +8962,203 @@ def generate_docker_command():
         return jsonify({
             'status': 'error',
             'message': f'生成Docker命令失败: {str(e)}'
+        }), 500
+
+# MCSM对接相关API
+MCSM_INSTANCES_FILE = os.path.join('/home/steam/games', 'mcsm_instances.json')
+
+def load_mcsm_instances():
+    """加载MCSM实例配置"""
+    try:
+        if os.path.exists(MCSM_INSTANCES_FILE):
+            with open(MCSM_INSTANCES_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return []
+    except Exception as e:
+        logger.error(f"加载MCSM实例配置失败: {str(e)}")
+        return []
+
+def save_mcsm_instances(instances):
+    """保存MCSM实例配置"""
+    try:
+        with open(MCSM_INSTANCES_FILE, 'w', encoding='utf-8') as f:
+            json.dump(instances, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        logger.error(f"保存MCSM实例配置失败: {str(e)}")
+        return False
+
+@app.route('/api/mcsm/instances', methods=['GET'])
+@auth_required
+def get_mcsm_instances():
+    """获取MCSM实例列表"""
+    try:
+        instances = load_mcsm_instances()
+        return jsonify({
+            'status': 'success',
+            'instances': instances
+        })
+    except Exception as e:
+        logger.error(f"获取MCSM实例列表失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'获取实例列表失败: {str(e)}'
+        }), 500
+
+@app.route('/api/mcsm/script-content', methods=['GET'])
+@auth_required
+def get_script_content():
+    """获取服务器启动脚本内容"""
+    try:
+        server_path = request.args.get('serverPath')
+        if not server_path:
+            return jsonify({
+                'status': 'error',
+                'message': '请提供服务器路径'
+            }), 400
+        
+        script_file = os.path.join(server_path, '.last_script')
+        if not os.path.exists(script_file):
+            return jsonify({
+                'status': 'success',
+                'content': '# 未找到启动脚本文件\n# 请手动配置启动命令'
+            })
+        
+        with open(script_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        return jsonify({
+            'status': 'success',
+            'content': content
+        })
+    except Exception as e:
+        logger.error(f"获取脚本内容失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'获取脚本内容失败: {str(e)}'
+        }), 500
+
+@app.route('/api/mcsm/create-instance', methods=['POST'])
+@auth_required
+def create_mcsm_instance():
+    """创建MCSM实例"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'status': 'error',
+                'message': '请提供实例配置信息'
+            }), 400
+        
+        # 验证必需字段
+        required_fields = ['urlapi', 'daemonId', 'apikey', 'nickname', 'cwd', 'image', 'startCommand']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({
+                    'status': 'error',
+                    'message': f'缺少必需字段: {field}'
+                }), 400
+        
+        # 获取启动脚本名称
+        script_name = data.get('startCommand', 'start.sh')
+        
+        # 导入MCSM SDK
+        from mcsm_sdk import create_instance
+        
+        # 调用MCSM API创建实例
+        result = create_instance(
+            urlapi=data['urlapi'],
+            daemonId=data['daemonId'],
+            apikey=data['apikey'],
+            nickname=data['nickname'],
+            cwd=data['cwd'],
+            image=data['image'],
+            CUSTOM_RUN_SCRIPT=script_name
+        )
+        
+        # 检查MCSM API响应
+        if result.get('status') == 200:
+            # 保存实例信息到本地
+            instances = load_mcsm_instances()
+            
+            instance_data = {
+                'id': str(uuid.uuid4()),
+                'urlapi': data['urlapi'],
+                'daemonId': data['daemonId'],
+                'apikey': data['apikey'],
+                'nickname': data['nickname'],
+                'cwd': data['cwd'],
+                'image': data['image'],
+                'scriptName': script_name,
+                'createTime': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'mcsmInstanceId': result.get('data', {}).get('instanceUuid', '')
+            }
+            
+            instances.append(instance_data)
+            
+            if save_mcsm_instances(instances):
+                return jsonify({
+                    'status': 'success',
+                    'message': 'MCSM实例创建成功',
+                    'instance': instance_data,
+                    'mcsmResult': result
+                })
+            else:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'MCSM实例创建成功，但保存本地配置失败'
+                }), 500
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': f'MCSM API调用失败: {result.get("data", "未知错误")}',
+                'mcsmResult': result
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"创建MCSM实例失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'创建实例失败: {str(e)}'
+        }), 500
+
+@app.route('/api/mcsm/instances/<instance_id>', methods=['DELETE'])
+@auth_required
+def delete_mcsm_instance(instance_id):
+    """删除MCSM实例"""
+    try:
+        instances = load_mcsm_instances()
+        
+        # 查找要删除的实例
+        instance_to_delete = None
+        for i, instance in enumerate(instances):
+            if instance.get('id') == instance_id:
+                instance_to_delete = instances.pop(i)
+                break
+        
+        if not instance_to_delete:
+            return jsonify({
+                'status': 'error',
+                'message': '实例不存在'
+            }), 404
+        
+        # 保存更新后的实例列表
+        if save_mcsm_instances(instances):
+            return jsonify({
+                'status': 'success',
+                'message': '实例删除成功'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': '删除实例失败'
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"删除MCSM实例失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'删除实例失败: {str(e)}'
         }), 500
 
 if __name__ == '__main__':
