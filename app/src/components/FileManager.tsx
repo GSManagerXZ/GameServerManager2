@@ -1995,7 +1995,7 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', 
             transform: translateY(-1px);
           }
           .file-manager-hover .ant-btn:hover {
-            transform: translateY(-2px);
+            transform: translateY(-1px);
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
           }
           .file-manager-content {
