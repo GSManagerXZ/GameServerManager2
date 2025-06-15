@@ -1137,6 +1137,12 @@ const App: React.FC = () => {
   const [editingBackupTask, setEditingBackupTask] = useState<any>(null);
   const [backupForm] = Form.useForm();
   
+  // 文件收藏相关状态
+  const [favoriteFiles, setFavoriteFiles] = useState<any[]>([]);
+  const [favoriteModalVisible, setFavoriteModalVisible] = useState(false);
+  const [editingFavorite, setEditingFavorite] = useState<any>(null);
+  const [favoriteForm] = Form.useForm();
+  
   // 保存不活动效果设置到localStorage
   useEffect(() => {
     localStorage.setItem('enableInactiveEffect', enableInactiveEffect.toString());
@@ -1227,6 +1233,7 @@ const App: React.FC = () => {
   const [collapsed, setCollapsed] = useState<boolean>(false);
   const [fileManagerVisible, setFileManagerVisible_orig] = useState<boolean>(false);
   const [fileManagerPath, setFileManagerPath_orig] = useState<string>('/home/steam');
+  const [initialFileToOpen, setInitialFileToOpen] = useState<string | undefined>(undefined);
   const [isTransitioning, setIsTransitioning] = useState<boolean>(false);
 
   // Wrapped state setters with logging
@@ -2847,6 +2854,103 @@ const App: React.FC = () => {
     }
   };
 
+  // 文件收藏相关处理函数
+  const refreshFavoriteFiles = useCallback(async () => {
+    try {
+      const favoriteFilesData = localStorage.getItem('favoriteFiles');
+      if (favoriteFilesData) {
+        setFavoriteFiles(JSON.parse(favoriteFilesData));
+      }
+    } catch (error) {
+      console.error('获取收藏文件失败:', error);
+      message.error('获取收藏文件失败');
+    }
+  }, []);
+
+  const handleAddFavoriteFile = () => {
+    setEditingFavorite(null);
+    favoriteForm.resetFields();
+    setFavoriteModalVisible(true);
+  };
+
+  const handleEditFavoriteFile = (favorite: any) => {
+    setEditingFavorite(favorite);
+    favoriteForm.setFieldsValue({
+      name: favorite.name,
+      filePath: favorite.filePath,
+      description: favorite.description
+    });
+    setFavoriteModalVisible(true);
+  };
+
+  const handleDeleteFavoriteFile = (favoriteId: string) => {
+    try {
+      const updatedFavorites = favoriteFiles.filter(f => f.id !== favoriteId);
+      setFavoriteFiles(updatedFavorites);
+      localStorage.setItem('favoriteFiles', JSON.stringify(updatedFavorites));
+      message.success('收藏文件已删除');
+    } catch (error) {
+      console.error('删除收藏文件失败:', error);
+      message.error('删除收藏文件失败');
+    }
+  };
+
+  const handleFavoriteFormSubmit = async (values: any) => {
+    try {
+      // 验证必填字段
+      if (!values.name || !values.name.trim()) {
+        message.error('请输入文件备注');
+        return;
+      }
+      if (!values.filePath || !values.filePath.trim()) {
+        message.error('请输入文件路径');
+        return;
+      }
+
+      const favoriteData = {
+        id: editingFavorite ? editingFavorite.id : Date.now().toString(),
+        name: values.name.trim(),
+        filePath: values.filePath.trim(),
+        description: values.description ? values.description.trim() : '',
+        createdAt: editingFavorite ? editingFavorite.createdAt : new Date().toISOString()
+      };
+
+      let updatedFavorites;
+      if (editingFavorite) {
+        updatedFavorites = favoriteFiles.map(f => f.id === editingFavorite.id ? favoriteData : f);
+      } else {
+        updatedFavorites = [...favoriteFiles, favoriteData];
+      }
+
+      setFavoriteFiles(updatedFavorites);
+      localStorage.setItem('favoriteFiles', JSON.stringify(updatedFavorites));
+      
+      message.success(editingFavorite ? '收藏文件已更新' : '收藏文件已添加');
+      setFavoriteModalVisible(false);
+      setEditingFavorite(null);
+      favoriteForm.resetFields();
+    } catch (error) {
+      console.error('保存收藏文件失败:', error);
+      message.error('保存收藏文件失败');
+    }
+  };
+
+  const handleOpenFavoriteFile = (favorite: any) => {
+    // 提取目录路径
+    const dirPath = favorite.filePath.substring(0, favorite.filePath.lastIndexOf('/'));
+    setFileManagerPath(dirPath || '/home/steam');
+    setInitialFileToOpen(favorite.filePath);
+    setFileManagerVisible(true);
+    message.success(`正在打开文件: ${favorite.name}`);
+  };
+
+  // 清除initialFileToOpen状态，确保文件打开后状态被重置
+  useEffect(() => {
+    if (!fileManagerVisible && initialFileToOpen) {
+      setInitialFileToOpen(undefined);
+    }
+  }, [fileManagerVisible, initialFileToOpen]);
+
   // 初始化
   useEffect(() => {
     // 如果已登录，加载游戏列表
@@ -2898,8 +3002,11 @@ const App: React.FC = () => {
       };
       
       loadGames();
+      
+      // 加载收藏文件
+      refreshFavoriteFiles();
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, refreshFavoriteFiles]);
 
   // 加载自启动服务器列表
   const loadAutoRestartServers = async () => {
@@ -3667,6 +3774,7 @@ const App: React.FC = () => {
                     <OnlineDeploy />
                   </div>
                 </TabPane>
+
               </Tabs>
               </div>
             </div>
@@ -4217,6 +4325,74 @@ const App: React.FC = () => {
                     </Row>
                   </div>
                 </TabPane>
+                <TabPane tab="文件收藏" key="favorites">
+                  <div className="favorite-files-management">
+                    <div className="favorite-controls">
+                      <Button onClick={handleAddFavoriteFile} type="primary" style={{marginRight: 8}}>添加收藏文件</Button>
+                      <Button onClick={refreshFavoriteFiles} icon={<ReloadOutlined />}>刷新列表</Button>
+                    </div>
+                    <Row gutter={[16, 16]} style={{marginTop: 16}}>
+                      {favoriteFiles.map(favorite => (
+                        <Col key={favorite.id} xs={24} sm={12} md={8} lg={6}>
+                          <Card
+                            title={favorite.name}
+                            extra={
+                              <Tag color="blue">收藏</Tag>
+                            }
+                            style={{ borderRadius: '8px', overflow: 'hidden' }}
+                          >
+                            <div style={{marginBottom: 8}}>
+                              <strong>文件路径:</strong>
+                              <div style={{wordBreak: 'break-all', fontSize: '12px', color: '#666'}}>
+                                {favorite.filePath}
+                              </div>
+                            </div>
+                            {favorite.description && (
+                              <div style={{marginBottom: 12}}>
+                                <strong>描述:</strong>
+                                <div style={{fontSize: '12px', color: '#666'}}>
+                                  {favorite.description}
+                                </div>
+                              </div>
+                            )}
+                            <div style={{marginBottom: 8, fontSize: '12px', color: '#999'}}>
+                              创建时间: {new Date(favorite.createdAt).toLocaleString()}
+                            </div>
+                            <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap'}}>
+                              <Button 
+                                type="primary"
+                                size="small"
+                                onClick={() => handleOpenFavoriteFile(favorite)}
+                              >
+                                打开编辑
+                              </Button>
+                              <Button 
+                                size="small"
+                                onClick={() => handleEditFavoriteFile(favorite)}
+                              >
+                                编辑
+                              </Button>
+                              <Button 
+                                danger
+                                size="small"
+                                onClick={() => handleDeleteFavoriteFile(favorite.id)}
+                              >
+                                删除
+                              </Button>
+                            </div>
+                          </Card>
+                        </Col>
+                      ))}
+                      {favoriteFiles.length === 0 && (
+                        <Col span={24}>
+                          <div className="empty-favorite-files">
+                            <p>暂无收藏文件，点击"添加收藏文件"创建新收藏</p>
+                          </div>
+                        </Col>
+                      )}
+                    </Row>
+                  </div>
+                </TabPane>
               </Tabs>
               </div>
             </div>
@@ -4692,6 +4868,79 @@ const App: React.FC = () => {
         </div>
       </Modal>
       
+      {/* 文件收藏Modal */}
+      <Modal
+        title={editingFavorite ? '编辑收藏文件' : '添加收藏文件'}
+        open={favoriteModalVisible}
+        onCancel={() => {
+          setFavoriteModalVisible(false);
+          setEditingFavorite(null);
+          favoriteForm.resetFields();
+        }}
+        footer={null}
+        width={isMobile ? "95%" : 600}
+      >
+        <Form
+          form={favoriteForm}
+          layout="vertical"
+          onFinish={handleFavoriteFormSubmit}
+          style={{ marginTop: 20 }}
+        >
+          <Form.Item
+            name="name"
+            label="文件备注"
+            rules={[{ required: true, message: '请输入文件备注' }]}
+          >
+            <Input placeholder="例如：服务器配置文件" />
+          </Form.Item>
+          
+          <Form.Item
+            name="filePath"
+            label="文件路径"
+            rules={[{ required: true, message: '请输入文件路径' }]}
+          >
+            <Input placeholder="例如：/home/steam/games/minecraft/server.properties" />
+          </Form.Item>
+          
+          <Form.Item
+            name="description"
+            label="描述（可选）"
+          >
+            <Input.TextArea 
+              placeholder="例如：Minecraft服务器的主要配置文件，包含端口、游戏模式等设置" 
+              rows={3}
+            />
+          </Form.Item>
+          
+          <div style={{ textAlign: 'center', marginTop: 24 }}>
+            <Button 
+              type="default" 
+              style={{ marginRight: 8 }}
+              onClick={() => {
+                setFavoriteModalVisible(false);
+                setEditingFavorite(null);
+                favoriteForm.resetFields();
+              }}
+            >
+              取消
+            </Button>
+            <Button type="primary" htmlType="submit">
+              {editingFavorite ? '更新收藏' : '添加收藏'}
+            </Button>
+          </div>
+        </Form>
+        
+        <div style={{ marginTop: 20, padding: 16, backgroundColor: '#f6f8fa', borderRadius: 6 }}>
+          <p style={{ margin: 0, fontSize: 12, color: '#666' }}>
+            <strong>说明：</strong><br/>
+            • 文件路径为容器内的绝对路径，也就是文件管理中显示的路径<br/>
+            • 点击"打开编辑"将跳转到文件管理页面并定位到该文件<br/>
+            • 文件备注和文件路径为必填项，描述为可选项<br/>
+            • 收藏信息保存在浏览器本地存储中
+          </p>
+        </div>
+      </Modal>
+      
       {/* 文件管理器Modal - THIS IS THE NESTED WINDOW */}
       <Modal
         title={`游戏文件管理 - ${fileManagerPath.split('/').pop() || ''}`} // Dynamic title based on path
@@ -4721,6 +4970,7 @@ const App: React.FC = () => {
           <FileManager 
             initialPath={fileManagerPath} 
             isVisible={fileManagerVisible} // Pass the modal's visibility state
+            initialFileToOpen={initialFileToOpen}
           />
         )}
       </Modal>

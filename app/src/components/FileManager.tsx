@@ -54,9 +54,10 @@ interface ContextMenuPosition {
 interface FileManagerProps {
   initialPath?: string;
   isVisible?: boolean; // New prop
+  initialFileToOpen?: string; // 直接打开指定文件进行编辑
 }
 
-const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', isVisible = true }) => {
+const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', isVisible = true, initialFileToOpen }) => {
   // 创建一个唯一的实例ID，用于识别当前组件实例
   const instanceId = useRef<string>(Math.random().toString(36).substring(2, 15));
   const isMountedRef = useRef<boolean>(false); // Initialize to false, set to true in mount effect
@@ -1597,6 +1598,7 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', 
         max-width: 280px;
         animation: contextMenuFadeIn 0.15s ease-in-out;
       }
+
       @keyframes contextMenuFadeIn {
         from { opacity: 0; transform: translateY(-10px); }
         to { opacity: 1; transform: translateY(0); }
@@ -1609,6 +1611,22 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', 
       document.head.removeChild(styleElement);
     };
   }, []);
+
+  // 处理初始文件打开
+  useEffect(() => {
+    if (initialFileToOpen && isVisible) {
+      // 创建一个文件对象来打开编辑器
+      const fileToOpen = {
+        name: initialFileToOpen.split('/').pop() || '',
+        path: initialFileToOpen,
+        type: 'file' as const,
+        size: 0,
+        modified: '',
+        permissions: ''
+      };
+      openFileForEdit(fileToOpen);
+    }
+  }, [initialFileToOpen, isVisible]);
 
   // 添加帮助弹窗状态
   const [helpModalVisible, setHelpModalVisible] = useState<boolean>(false);
