@@ -66,6 +66,7 @@ interface JavaVersion {
 
 const MinecraftModpackDeploy: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [maxResults, setMaxResults] = useState(20);
   const [modpacks, setModpacks] = useState<Modpack[]>([]);
   const [selectedModpack, setSelectedModpack] = useState<Modpack | null>(null);
   const [versions, setVersions] = useState<ModpackVersion[]>([]);
@@ -122,7 +123,7 @@ const MinecraftModpackDeploy: React.FC = () => {
       const response = await axios.get('/api/minecraft/modpack/search', {
         params: {
           query: searchQuery,
-          max_results: 20
+          max_results: maxResults
         }
       });
 
@@ -278,6 +279,7 @@ const MinecraftModpackDeploy: React.FC = () => {
   // 重置表单
   const resetForm = () => {
     setSearchQuery('');
+    setMaxResults(20);
     setModpacks([]);
     setSelectedModpack(null);
     setVersions([]);
@@ -349,7 +351,7 @@ const MinecraftModpackDeploy: React.FC = () => {
       {/* 步骤1: 搜索整合包 */}
       {currentStep === 0 && (
         <Card title="搜索整合包" style={{ marginBottom: 16 }}>
-          <Space.Compact style={{ width: '100%' }}>
+          <Space.Compact style={{ width: '100%', marginBottom: 16 }}>
             <Input
               placeholder="输入整合包名称进行搜索..."
               value={searchQuery}
@@ -367,12 +369,30 @@ const MinecraftModpackDeploy: React.FC = () => {
             </Button>
           </Space.Compact>
           
+          <Row gutter={16} style={{ marginBottom: 16 }}>
+            <Col span={12}>
+              <div>
+                <Text strong style={{ marginBottom: 8, display: 'block' }}>搜索结果数量</Text>
+                <Select
+                  value={maxResults}
+                  onChange={setMaxResults}
+                  style={{ width: '100%' }}
+                  placeholder="选择搜索结果数量"
+                >
+                  <Option value={10}>10个结果</Option>
+                  <Option value={20}>20个结果</Option>
+                  <Option value={50}>50个结果</Option>
+                  <Option value={100}>100个结果</Option>
+                </Select>
+              </div>
+            </Col>
+          </Row>
+          
           <Alert
             message="提示"
-            description="您可以搜索整合包名称、作者或关键词。留空搜索将显示热门整合包。"
+            description="您可以搜索整合包名称、作者或关键词。可以调整搜索结果数量来获取更多或更少的结果。"
             type="info"
             showIcon
-            style={{ marginTop: 16 }}
           />
         </Card>
       )}
