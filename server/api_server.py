@@ -9161,6 +9161,76 @@ def delete_mcsm_instance(instance_id):
             'message': f'删除实例失败: {str(e)}'
         }), 500
 
+@app.route('/api/settings/favorite-files', methods=['GET'])
+@auth_required
+def get_favorite_files():
+    """获取文件收藏配置"""
+    try:
+        from config import load_config
+        config = load_config()
+        
+        # 获取文件收藏配置，如果不存在则返回空列表
+        favorite_files = config.get('favorite_files', [])
+        
+        return jsonify({
+            'status': 'success',
+            'favorite_files': favorite_files
+        })
+        
+    except Exception as e:
+        logger.error(f"获取文件收藏配置时出错: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'获取文件收藏配置失败: {str(e)}'
+        }), 500
+
+@app.route('/api/settings/favorite-files', methods=['POST'])
+@auth_required
+def save_favorite_files():
+    """保存文件收藏配置"""
+    try:
+        data = request.json
+        
+        if not isinstance(data, dict) or 'favorite_files' not in data:
+            return jsonify({
+                'status': 'error',
+                'message': '请求数据格式错误'
+            }), 400
+        
+        favorite_files = data['favorite_files']
+        
+        if not isinstance(favorite_files, list):
+            return jsonify({
+                'status': 'error',
+                'message': '收藏文件数据必须是数组格式'
+            }), 400
+        
+        # 加载现有配置
+        from config import load_config, save_config
+        config = load_config()
+        
+        # 更新文件收藏配置
+        config['favorite_files'] = favorite_files
+        
+        # 保存配置到 /home/steam/games/config.json
+        if save_config(config):
+            return jsonify({
+                'status': 'success',
+                'message': '文件收藏配置保存成功'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': '保存文件收藏配置失败'
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"保存文件收藏配置时出错: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'保存文件收藏配置失败: {str(e)}'
+        }), 500
+
 if __name__ == '__main__':
     logger.warning("检测到直接运行api_server.py")
     logger.warning("======================================================")

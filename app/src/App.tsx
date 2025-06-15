@@ -2857,9 +2857,12 @@ const App: React.FC = () => {
   // 文件收藏相关处理函数
   const refreshFavoriteFiles = useCallback(async () => {
     try {
-      const favoriteFilesData = localStorage.getItem('favoriteFiles');
-      if (favoriteFilesData) {
-        setFavoriteFiles(JSON.parse(favoriteFilesData));
+      const response = await axios.get('/api/settings/favorite-files');
+      if (response.data.status === 'success') {
+        setFavoriteFiles(response.data.favorite_files || []);
+      } else {
+        console.error('获取收藏文件失败:', response.data.message);
+        message.error('获取收藏文件失败');
       }
     } catch (error) {
       console.error('获取收藏文件失败:', error);
@@ -2883,12 +2886,21 @@ const App: React.FC = () => {
     setFavoriteModalVisible(true);
   };
 
-  const handleDeleteFavoriteFile = (favoriteId: string) => {
+  const handleDeleteFavoriteFile = async (favoriteId: string) => {
     try {
       const updatedFavorites = favoriteFiles.filter(f => f.id !== favoriteId);
-      setFavoriteFiles(updatedFavorites);
-      localStorage.setItem('favoriteFiles', JSON.stringify(updatedFavorites));
-      message.success('收藏文件已删除');
+      
+      const response = await axios.post('/api/settings/favorite-files', {
+        favorite_files: updatedFavorites
+      });
+      
+      if (response.data.status === 'success') {
+        setFavoriteFiles(updatedFavorites);
+        message.success('收藏文件已删除');
+      } else {
+        console.error('删除收藏文件失败:', response.data.message);
+        message.error('删除收藏文件失败');
+      }
     } catch (error) {
       console.error('删除收藏文件失败:', error);
       message.error('删除收藏文件失败');
@@ -2922,13 +2934,20 @@ const App: React.FC = () => {
         updatedFavorites = [...favoriteFiles, favoriteData];
       }
 
-      setFavoriteFiles(updatedFavorites);
-      localStorage.setItem('favoriteFiles', JSON.stringify(updatedFavorites));
+      const response = await axios.post('/api/settings/favorite-files', {
+        favorite_files: updatedFavorites
+      });
       
-      message.success(editingFavorite ? '收藏文件已更新' : '收藏文件已添加');
-      setFavoriteModalVisible(false);
-      setEditingFavorite(null);
-      favoriteForm.resetFields();
+      if (response.data.status === 'success') {
+        setFavoriteFiles(updatedFavorites);
+        message.success(editingFavorite ? '收藏文件已更新' : '收藏文件已添加');
+        setFavoriteModalVisible(false);
+        setEditingFavorite(null);
+        favoriteForm.resetFields();
+      } else {
+        console.error('保存收藏文件失败:', response.data.message);
+        message.error('保存收藏文件失败');
+      }
     } catch (error) {
       console.error('保存收藏文件失败:', error);
       message.error('保存收藏文件失败');
@@ -4342,7 +4361,7 @@ const App: React.FC = () => {
                             style={{ borderRadius: '8px', overflow: 'hidden' }}
                           >
                             <div style={{marginBottom: 8}}>
-                              <strong>文件路径:</strong>
+                              <strong>文件路径(容器绝对路径):</strong>
                               <div style={{wordBreak: 'break-all', fontSize: '12px', color: '#666'}}>
                                 {favorite.filePath}
                               </div>
