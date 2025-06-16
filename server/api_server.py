@@ -6147,11 +6147,16 @@ def deploy_online_game():
         download_url = data.get('downloadUrl')
         script_content = data.get('script')
         
-        if not all([game_id, game_name, download_url, script_content]):
+        # 验证必要参数，script_content可以为空
+        if not all([game_id, game_name, download_url]):
             return jsonify({
                 'status': 'error',
                 'message': '缺少必要参数'
             }), 400
+        
+        # script_content为None时设为空字符串
+        if script_content is None:
+            script_content = ""
         
         # 检查是否已有部署在进行
         if game_id in active_online_deployments:
