@@ -132,8 +132,14 @@ const ServerGuide: React.FC = () => {
       tags: ['Minecraft', '论坛']
     },
     {
+      name: '幻兽帕鲁 | 配置文件生成',
+      description: '幻兽帕鲁服务器设定生成',
+      url: 'https://www.huaxiahulian.com/hspl/',
+      tags: ['工具']
+    },
+    {
       name: '幻兽帕鲁 | 繁殖计算器',
-      description: '最大的Minecraft中文MOD百科',
+      description: '通过它们的繁殖力确定成对帕鲁数量的后代。',
       url: 'https://palworld.gg/zh-Hans/breeding-calculator',
       tags: ['工具']
     },

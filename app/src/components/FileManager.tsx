@@ -7,7 +7,7 @@ import {
 } from 'antd';
 import { 
   FileOutlined, FolderOutlined, 
-  EditOutlined, CopyOutlined, 
+  CopyOutlined, 
   ScissorOutlined, DeleteOutlined, 
   DownloadOutlined, UploadOutlined, 
   SaveOutlined, ArrowUpOutlined,
@@ -15,7 +15,7 @@ import {
   InboxOutlined, EyeOutlined, FileImageOutlined,
   ReloadOutlined, CompressOutlined, FileZipOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined,
-  QuestionCircleOutlined, FolderOpenOutlined,
+  QuestionCircleOutlined,
   FormOutlined, SafetyCertificateOutlined
 } from '@ant-design/icons';
 import axios from 'axios';
@@ -479,6 +479,22 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', 
         e.preventDefault();
         saveFile(); // Calls the stable saveFile which now uses saveFileInternal
         return;
+      }
+      return;
+    }
+
+    // 处理F2重命名快捷键
+    if (e.key === 'F2') {
+      e.preventDefault();
+      if (selectedFilesRef.current.length === 1) {
+        const fileToRename = selectedFilesRef.current[0];
+        setSelectedFile(fileToRename);
+        setNewFileName(fileToRename.name);
+        setIsRenameModalVisible(true);
+      } else if (selectedFilesRef.current.length === 0) {
+        message.info('请先选择要重命名的文件或文件夹');
+      } else {
+        message.info('请选择单个文件或文件夹进行重命名');
       }
       return;
     }
@@ -1150,25 +1166,14 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', 
       key: 'action',
       render: (_, record: FileInfo) => (
         <Space size="small">
-          {record.type === 'file' && (
-            <>
-              <Tooltip title="编辑">
-                <Button 
-                  type="text" 
-                  icon={<EditOutlined />} 
-                  onClick={() => openFileForEdit(record)} 
-                />
-              </Tooltip>
-              {isImageFile(record.name) && (
-                <Tooltip title="预览">
-                  <Button 
-                    type="text" 
-                    icon={<EyeOutlined />} 
-                    onClick={() => previewImage(record)} 
-                  />
-                </Tooltip>
-              )}
-            </>
+          {record.type === 'file' && isImageFile(record.name) && (
+            <Tooltip title="预览">
+              <Button 
+                type="text" 
+                icon={<EyeOutlined />} 
+                onClick={() => previewImage(record)} 
+              />
+            </Tooltip>
           )}
           <Tooltip title="复制">
             <Button 
@@ -1187,7 +1192,7 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', 
           <Tooltip title="重命名">
             <Button 
               type="text" 
-              icon={<EditOutlined />} 
+              icon={<FormOutlined />} 
               onClick={() => {
                 setSelectedFile(record);
                 setNewFileName(record.name);
@@ -1924,8 +1929,6 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', 
                   onDoubleClick: () => {
                     if (record.type === 'directory') {
                       navigateToDirectory(record.path);
-                    } else {
-                      openFileForEdit(record);
                     }
                   },
                   onContextMenu: (e) => handleContextMenu(e, record),
@@ -2115,12 +2118,6 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', 
             <Menu>
               {contextMenuFile.type === 'directory' ? (
                 <>
-                  <Menu.Item key="open" onClick={() => {
-                    navigateToDirectory(contextMenuFile.path);
-                    hideAllContextMenus();
-                  }} icon={<FolderOpenOutlined />}>
-                    打开文件夹
-                  </Menu.Item>
                   <Menu.Item key="download-folder" onClick={() => {
                     // 下载文件夹（先压缩再下载）
                     setLoading(true);
@@ -2169,12 +2166,7 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', 
                 </>
               ) : (
                 <>
-                  <Menu.Item key="edit" onClick={() => {
-                    openFileForEdit(contextMenuFile);
-                    hideAllContextMenus();
-                  }} icon={<EditOutlined />}>
-                    编辑
-                  </Menu.Item>
+
                   {isImageFile(contextMenuFile.name) && (
                     <Menu.Item key="preview" onClick={() => {
                       previewImage(contextMenuFile);
@@ -2223,6 +2215,43 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', 
                 hideAllContextMenus();
               }} icon={<ScissorOutlined />}>
                 剪切
+              </Menu.Item>
+              <Menu.Item key="copy-path" onClick={() => {
+                // 复制文件路径到系统剪贴板
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                  navigator.clipboard.writeText(contextMenuFile.path).then(() => {
+                    message.success(`已复制路径: ${contextMenuFile.path}`);
+                  }).catch(() => {
+                    // 降级到传统方法
+                    const textArea = document.createElement('textarea');
+                    textArea.value = contextMenuFile.path;
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    try {
+                      document.execCommand('copy');
+                      message.success(`已复制路径: ${contextMenuFile.path}`);
+                    } catch (err) {
+                      message.error('复制路径失败');
+                    }
+                    document.body.removeChild(textArea);
+                  });
+                } else {
+                  // 降级到传统方法
+                  const textArea = document.createElement('textarea');
+                  textArea.value = contextMenuFile.path;
+                  document.body.appendChild(textArea);
+                  textArea.select();
+                  try {
+                    document.execCommand('copy');
+                    message.success(`已复制路径: ${contextMenuFile.path}`);
+                  } catch (err) {
+                    message.error('复制路径失败');
+                  }
+                  document.body.removeChild(textArea);
+                }
+                hideAllContextMenus();
+              }} icon={<CopyOutlined />}>
+                复制路径
               </Menu.Item>
               <Menu.Item key="rename" onClick={() => {
                 setSelectedFile(contextMenuFile);
