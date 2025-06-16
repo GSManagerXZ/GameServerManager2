@@ -1706,7 +1706,18 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', 
                 </Button>
                 <Button 
                   icon={<CompressOutlined />} 
-                  onClick={compressFiles}
+                  onClick={() => {
+                    if (selectedFiles.length > 0) {
+                      // 默认压缩文件名
+                      const defaultName = selectedFiles.length === 1 
+                        ? `${selectedFiles[0].name}.zip` 
+                        : `archive_${new Date().getTime()}.zip`;
+                      setCompressName(defaultName);
+                      setIsCompressModalVisible(true);
+                    } else {
+                      message.warning('请选择要压缩的文件或文件夹');
+                    }
+                  }}
                   disabled={selectedFiles.length === 0}
                 >
                   压缩
