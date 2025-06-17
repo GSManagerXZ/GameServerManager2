@@ -1,6 +1,7 @@
 import os
 import configparser
 import json
+import os
 from typing import Dict, List, Any, Optional
 from flask import jsonify
 import logging
@@ -18,7 +19,8 @@ class GameConfigManager:
             'configobj': self._parse_with_configobj,
             'pyhocon': self._parse_with_pyhocon,
             'ruamel.yaml': self._parse_with_yaml,
-            'properties': self._parse_with_properties
+            'properties': self._parse_with_properties,
+            'json': self._parse_with_json
         }
     
     def get_available_configs(self) -> List[Dict[str, str]]:
@@ -116,6 +118,8 @@ class GameConfigManager:
 
             elif parser_type == 'properties':
                 return self._save_with_properties(full_config_path, config_data, config_schema)
+            elif parser_type == 'json':
+                return self._save_with_json(full_config_path, config_data, config_schema)
             else:
                 logger.error(f"不支持的解析器类型: {parser_type}")
                 return False
@@ -591,6 +595,128 @@ class GameConfigManager:
             
         except Exception as e:
             logger.error(f"properties配置保存失败: {e}")
+            return False
+    
+    def _parse_with_json(self, config_path: str, config_schema: Dict[str, Any]) -> Dict[str, Any]:
+        """使用JSON格式解析配置文件"""
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            
+            result = {}
+            for section in config_schema.get('sections', []):
+                section_key = section['key']
+                result[section_key] = {}
+                
+                if section_key in config:
+                    for field in section.get('fields', []):
+                        field_name = field['name']
+                        if field_name in config[section_key]:
+                            value = config[section_key][field_name]
+                            
+                            # 检查是否为嵌套字段
+                            if field.get('type') == 'nested':
+                                # JSON中的嵌套字段可能是对象或数组
+                                if isinstance(value, dict):
+                                    # 将对象转换为键值对数组
+                                    nested_array = []
+                                    for k, v in value.items():
+                                        if isinstance(v, str) and ' ' in v:
+                                            nested_array.append(f'{k}="{v}"')
+                                        else:
+                                            nested_array.append(f'{k}={v}')
+                                    value = nested_array
+                                elif isinstance(value, list):
+                                    # 如果已经是数组，直接使用
+                                    pass
+                                else:
+                                    value = []
+                            else:
+                                # 普通字段的类型转换
+                                if 'default' in field:
+                                    default_type = type(field['default'])
+                                    if default_type == bool and not isinstance(value, bool):
+                                        value = str(value).lower() in ('true', '1', 'yes', 'on')
+                                    elif default_type == int and not isinstance(value, int):
+                                        value = int(value)
+                                    elif default_type == float and not isinstance(value, (int, float)):
+                                        value = float(value)
+                            
+                            result[section_key][field_name] = value
+                            logger.info(f"JSON解析字段 {field_name} = {value}")
+                        # 如果字段不存在，不设置默认值
+                else:
+                    # 如果section不存在，创建空的section但不填充默认值
+                    pass
+                        
+            logger.info(f"JSON解析结果: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"JSON解析失败: {e}")
+            return {}
+    
+    def _save_with_json(self, config_path: str, config_data: Dict[str, Any], config_schema: Dict[str, Any]) -> bool:
+        """使用JSON格式保存配置文件"""
+        try:
+            # 处理嵌套字段
+            processed_data = {}
+            
+            for section_key, section_data in config_data.items():
+                processed_data[section_key] = {}
+                
+                # 获取对应的schema section
+                schema_section = None
+                for section in config_schema.get('sections', []):
+                    if section['key'] == section_key:
+                        schema_section = section
+                        break
+                
+                for field_name, field_value in section_data.items():
+                    # 检查是否为嵌套字段
+                    field_schema = None
+                    if schema_section:
+                        for field in schema_section.get('fields', []):
+                            if field['name'] == field_name:
+                                field_schema = field
+                                break
+                    
+                    if field_schema and field_schema.get('type') == 'nested':
+                        # 处理嵌套字段，将字符串数组转换为JSON对象
+                        if isinstance(field_value, list):
+                            nested_obj = {}
+                            for element in field_value:
+                                if '=' in element:
+                                    key, value = element.split('=', 1)
+                                    # 去掉可能的引号
+                                    if value.startswith('"') and value.endswith('"'):
+                                        value = value[1:-1]
+                                    
+                                    # 尝试转换为合适的类型
+                                    try:
+                                        if value.lower() in ('true', 'false'):
+                                            nested_obj[key] = value.lower() == 'true'
+                                        elif value.isdigit():
+                                            nested_obj[key] = int(value)
+                                        elif '.' in value and value.replace('.', '').isdigit():
+                                            nested_obj[key] = float(value)
+                                        else:
+                                            nested_obj[key] = value
+                                    except:
+                                        nested_obj[key] = value
+                            processed_data[section_key][field_name] = nested_obj
+                        else:
+                            processed_data[section_key][field_name] = field_value
+                    else:
+                        processed_data[section_key][field_name] = field_value
+            
+            # 保存为格式化的JSON文件
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(processed_data, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"JSON配置保存成功: {config_path}")
+            return True
+        except Exception as e:
+            logger.error(f"JSON保存失败: {e}")
             return False
 
 # 全局实例
