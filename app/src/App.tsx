@@ -3541,7 +3541,7 @@ const App: React.FC = () => {
             },
             {
               key: 'game-config',
-              icon: <SettingOutlined />,
+              icon: <ToolOutlined />,
               label: '游戏配置文件'
             },
             {
