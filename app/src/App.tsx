@@ -19,6 +19,7 @@ import Terminal from './components/Terminal';
 import SimpleServerTerminal from './components/SimpleServerTerminal';
 import ContainerInfo from './components/ContainerInfo';
 import FileManager from './components/FileManager';
+import GameConfigManager from './components/GameConfigManager'; // 导入游戏配置文件管理组件
 import DirectoryPicker from './components/DirectoryPicker';
 import Register from './components/Register'; // 导入注册组件
 import FrpManager from './components/FrpManager'; // 导入内网穿透组件
@@ -3459,6 +3460,11 @@ const App: React.FC = () => {
                   label: '服务端管理'
                 },
                 {
+                  key: 'game-config',
+                  icon: <SettingOutlined />,
+                  label: '游戏配置文件'
+                },
+                {
                   key: 'frp',
                   icon: <GlobalOutlined />,
                   label: '内网穿透'
@@ -3532,6 +3538,11 @@ const App: React.FC = () => {
               key: 'servers',
               icon: <PlayCircleOutlined />,
               label: '服务端管理'
+            },
+            {
+              key: 'game-config',
+              icon: <SettingOutlined />,
+              label: '游戏配置文件'
             },
             {
               key: 'frp',
@@ -4431,6 +4442,14 @@ const App: React.FC = () => {
                   // Its visibility is tied to whether 'files' is the currentNav.
                   isVisible={currentNav === 'files'} 
                 />
+              </div>
+            </div>
+          )}
+
+          {currentNav === 'game-config' && (
+            <div className={`nav-content ${isTransitioning ? 'fade-out' : ''}`}>
+              <div className="game-config-management">
+                <GameConfigManager />
               </div>
             </div>
           )}

@@ -9238,6 +9238,177 @@ def save_favorite_files():
             'message': f'保存文件收藏配置失败: {str(e)}'
         }), 500
 
+# 游戏配置文件管理相关API
+from game_config_manager import game_config_manager
+
+@app.route('/api/game-config/available', methods=['GET'])
+@auth_required
+def get_available_game_configs():
+    """获取所有可用的游戏配置文件模板"""
+    try:
+        configs = game_config_manager.get_available_configs()
+        return jsonify({
+            'status': 'success',
+            'configs': configs
+        })
+    except Exception as e:
+        logger.error(f"获取可用配置文件失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'获取可用配置文件失败: {str(e)}'
+        }), 500
+
+@app.route('/api/game-config/schema/<config_id>', methods=['GET'])
+@auth_required
+def get_game_config_schema(config_id):
+    """获取指定配置文件的模板结构"""
+    try:
+        schema = game_config_manager.get_config_schema(config_id)
+        if schema is None:
+            return jsonify({
+                'status': 'error',
+                'message': '配置文件模板不存在'
+            }), 404
+            
+        return jsonify({
+            'status': 'success',
+            'schema': schema
+        })
+    except Exception as e:
+        logger.error(f"获取配置文件模板失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'获取配置文件模板失败: {str(e)}'
+        }), 500
+
+@app.route('/api/game-config/read', methods=['POST'])
+@auth_required
+def read_game_config():
+    """读取游戏配置文件"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'status': 'error',
+                'message': '请求数据不能为空'
+            }), 400
+        
+        server_path = data.get('server_path')
+        config_id = data.get('config_id')
+        parser_type = data.get('parser_type', 'configobj')
+        
+        if not server_path or not config_id:
+            return jsonify({
+                'status': 'error',
+                'message': '服务端路径和配置文件ID不能为空'
+            }), 400
+        
+        # 获取配置模板
+        schema = game_config_manager.get_config_schema(config_id)
+        if schema is None:
+            return jsonify({
+                'status': 'error',
+                'message': '配置文件模板不存在'
+            }), 404
+        
+        # 读取配置文件
+        config_data = game_config_manager.read_game_config(server_path, schema, parser_type)
+        
+        return jsonify({
+            'status': 'success',
+            'config_data': config_data,
+            'schema': schema
+        })
+        
+    except Exception as e:
+        logger.error(f"读取游戏配置失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'读取游戏配置失败: {str(e)}'
+        }), 500
+
+@app.route('/api/game-config/save', methods=['POST'])
+@auth_required
+def save_game_config():
+    """保存游戏配置文件"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'status': 'error',
+                'message': '请求数据不能为空'
+            }), 400
+        
+        server_path = data.get('server_path')
+        config_id = data.get('config_id')
+        config_data = data.get('config_data')
+        parser_type = data.get('parser_type', 'configobj')
+        
+        if not server_path or not config_id or not config_data:
+            return jsonify({
+                'status': 'error',
+                'message': '服务端路径、配置文件ID和配置数据不能为空'
+            }), 400
+        
+        # 获取配置模板
+        schema = game_config_manager.get_config_schema(config_id)
+        if schema is None:
+            return jsonify({
+                'status': 'error',
+                'message': '配置文件模板不存在'
+            }), 404
+        
+        # 保存配置文件
+        success = game_config_manager.save_game_config(server_path, schema, config_data, parser_type)
+        
+        if success:
+            return jsonify({
+                'status': 'success',
+                'message': '配置文件保存成功'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': '配置文件保存失败'
+            }), 500
+        
+    except Exception as e:
+        logger.error(f"保存游戏配置失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'保存游戏配置失败: {str(e)}'
+        }), 500
+
+@app.route('/api/game-config/servers', methods=['GET'])
+@auth_required
+def get_available_servers():
+    """获取所有可用的服务端路径"""
+    try:
+        servers = []
+        
+        # 扫描已安装的游戏
+        if os.path.exists(GAMES_DIR):
+            for item in os.listdir(GAMES_DIR):
+                item_path = os.path.join(GAMES_DIR, item)
+                if os.path.isdir(item_path):
+                    servers.append({
+                        'id': item,
+                        'name': item,
+                        'path': item_path
+                    })
+        
+        return jsonify({
+            'status': 'success',
+            'servers': servers
+        })
+        
+    except Exception as e:
+        logger.error(f"获取可用服务端失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'获取可用服务端失败: {str(e)}'
+        }), 500
+
 if __name__ == '__main__':
     logger.warning("检测到直接运行api_server.py")
     logger.warning("======================================================")
