@@ -67,16 +67,28 @@ def add_server_output(game_id, message, max_lines=500):
         # 移除最旧的输出，保持在指定行数以内
         running_servers[game_id]['output'] = running_servers[game_id]['output'][-max_lines:]
 
+# 确保日志目录存在
+log_dir = '/home/steam/server'
+os.makedirs(log_dir, exist_ok=True)
+
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('api_server.log')
-    ]
+        logging.FileHandler('/home/steam/server/api_server.log', encoding='utf-8')
+    ],
+    force=True  # 强制重新配置日志
 )
 logger = logging.getLogger("api_server")
+
+# 测试日志是否正常工作
+logger.info("API服务器日志系统初始化完成")
+logger.info(f"日志文件路径: /home/steam/server/api_server.log")
+logger.info(f"当前工作目录: {os.getcwd()}")
+logger.info(f"Python版本: {sys.version}")
+logger.info("="*50)
 
 # FRP相关配置
 FRP_DIR = "/home/steam/FRP"
