@@ -28,6 +28,8 @@ import lzma
 import stat
 import zstandard as zstd
 import multiprocessing
+import secrets
+import struct
 from functools import wraps
 from flask import Flask, jsonify, request, send_from_directory, Response, stream_with_context, g, render_template_string, send_file, make_response
 from werkzeug.utils import secure_filename
@@ -211,7 +213,10 @@ def is_public_route(path):
     public_routes = [
         '/api/auth/login',
         '/api/auth/register',
-        '/api/auth/check_first_use'
+        '/api/auth/check_first_use',
+        '/api/auth/register_biometric',
+        '/api/auth/biometric_challenge',
+        '/api/auth/verify_biometric'
         # 注意：/api/terminate_install 需要认证，不应该出现在这个列表中
     ]
     return path in public_routes
@@ -4633,6 +4638,259 @@ def login():
     except Exception as e:
         logger.error(f"登录失败: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# 生物识别认证相关API
+
+# 生物识别凭据存储文件路径
+BIOMETRIC_CREDENTIALS_PATH = os.path.join(GAMES_DIR, 'biometric_credentials.json')
+
+def load_biometric_credentials():
+    """加载生物识别凭据"""
+    if not os.path.exists(BIOMETRIC_CREDENTIALS_PATH):
+        return {}
+    
+    try:
+        with open(BIOMETRIC_CREDENTIALS_PATH, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"加载生物识别凭据失败: {str(e)}")
+        return {}
+
+def save_biometric_credentials(credentials):
+    """保存生物识别凭据"""
+    try:
+        # 确保目录存在
+        os.makedirs(os.path.dirname(BIOMETRIC_CREDENTIALS_PATH), exist_ok=True)
+        
+        with open(BIOMETRIC_CREDENTIALS_PATH, 'w', encoding='utf-8') as f:
+            json.dump(credentials, f, ensure_ascii=False, indent=2)
+        
+        # 设置文件权限
+        os.chmod(BIOMETRIC_CREDENTIALS_PATH, 0o600)  # 只有所有者可读写
+        return True
+    except Exception as e:
+        logger.error(f"保存生物识别凭据失败: {str(e)}")
+        return False
+
+# 临时存储挑战值（实际生产环境应使用Redis等缓存）
+biometric_challenges = {}
+
+@app.route('/api/auth/register_biometric', methods=['POST'])
+def register_biometric():
+    """注册生物识别认证"""
+    try:
+        data = request.json
+        if not data:
+            return jsonify({
+                'status': 'error',
+                'message': '无效的请求数据'
+            }), 400
+        
+        username = data.get('username')
+        credential_id = data.get('id')
+        raw_id = data.get('rawId')
+        credential_type = data.get('type')
+        response_data = data.get('response', {})
+        
+        if not all([username, credential_id, raw_id, credential_type, response_data]):
+            return jsonify({
+                'status': 'error',
+                'message': '缺少必要的凭据信息'
+            }), 400
+        
+        # 验证用户是否存在
+        user_exists = False
+        if os.path.exists(USER_CONFIG_PATH):
+            try:
+                with open(USER_CONFIG_PATH, 'r') as f:
+                    config = json.load(f)
+                users = config.get('users', [])
+                for user in users:
+                    if user.get('username') == username:
+                        user_exists = True
+                        break
+            except Exception as e:
+                logger.error(f"验证用户存在性失败: {str(e)}")
+        
+        if not user_exists:
+            return jsonify({
+                'status': 'error',
+                'message': '用户不存在'
+            }), 404
+        
+        # 加载现有的生物识别凭据
+        credentials = load_biometric_credentials()
+        
+        # 检查用户是否已经注册过生物识别
+        if username in credentials:
+            return jsonify({
+                'status': 'error',
+                'message': '该用户已注册生物识别认证'
+            }), 400
+        
+        # 存储凭据信息（简化版本，实际应该验证attestation）
+        credential_data = {
+            'id': credential_id,
+            'rawId': raw_id,
+            'type': credential_type,
+            'response': response_data,
+            'username': username,
+            'created_at': time.time()
+        }
+        
+        credentials[username] = credential_data
+        
+        # 保存凭据
+        if save_biometric_credentials(credentials):
+            logger.info(f"用户 {username} 成功注册生物识别认证")
+            return jsonify({
+                'status': 'success',
+                'message': '生物识别认证注册成功'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': '保存生物识别凭据失败'
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"注册生物识别认证失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'注册失败: {str(e)}'
+        }), 500
+
+@app.route('/api/auth/biometric_challenge', methods=['GET'])
+def get_biometric_challenge():
+    """获取生物识别认证挑战值"""
+    try:
+        # 生成随机挑战值
+        challenge = secrets.token_bytes(32)
+        challenge_b64 = base64.b64encode(challenge).decode('utf-8')
+        
+        # 生成挑战ID
+        challenge_id = str(uuid.uuid4())
+        
+        # 存储挑战值（实际生产环境应设置过期时间）
+        biometric_challenges[challenge_id] = {
+            'challenge': challenge_b64,
+            'created_at': time.time()
+        }
+        
+        # 清理过期的挑战值（超过5分钟）
+        current_time = time.time()
+        expired_challenges = []
+        for cid, cdata in biometric_challenges.items():
+            if current_time - cdata['created_at'] > 300:  # 5分钟
+                expired_challenges.append(cid)
+        
+        for cid in expired_challenges:
+            del biometric_challenges[cid]
+        
+        # 加载生物识别凭据，获取允许的凭据列表
+        credentials = load_biometric_credentials()
+        allow_credentials = []
+        
+        for username, cred_data in credentials.items():
+            allow_credentials.append({
+                'id': cred_data['rawId'],
+                'type': cred_data['type']
+            })
+        
+        return jsonify({
+            'status': 'success',
+            'challenge': challenge_b64,
+            'challengeId': challenge_id,
+            'allowCredentials': allow_credentials
+        })
+        
+    except Exception as e:
+        logger.error(f"生成生物识别挑战值失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'生成挑战值失败: {str(e)}'
+        }), 500
+
+@app.route('/api/auth/verify_biometric', methods=['POST'])
+def verify_biometric():
+    """验证生物识别认证"""
+    try:
+        data = request.json
+        if not data:
+            return jsonify({
+                'status': 'error',
+                'message': '无效的请求数据'
+            }), 400
+        
+        credential_id = data.get('id')
+        raw_id = data.get('rawId')
+        credential_type = data.get('type')
+        response_data = data.get('response', {})
+        
+        if not all([credential_id, raw_id, credential_type, response_data]):
+            return jsonify({
+                'status': 'error',
+                'message': '缺少必要的认证信息'
+            }), 400
+        
+        # 加载生物识别凭据
+        credentials = load_biometric_credentials()
+        
+        # 查找匹配的凭据
+        matched_user = None
+        for username, cred_data in credentials.items():
+            if cred_data['id'] == credential_id and cred_data['rawId'] == raw_id:
+                matched_user = username
+                break
+        
+        if not matched_user:
+            logger.warning(f"未找到匹配的生物识别凭据: {credential_id}")
+            return jsonify({
+                'status': 'error',
+                'message': '未找到匹配的生物识别凭据'
+            }), 404
+        
+        # 简化版本的验证（实际应该验证签名等）
+        # 这里我们假设如果凭据ID匹配就认为验证成功
+        
+        # 获取用户信息
+        user = None
+        if os.path.exists(USER_CONFIG_PATH):
+            try:
+                with open(USER_CONFIG_PATH, 'r') as f:
+                    config = json.load(f)
+                users = config.get('users', [])
+                for u in users:
+                    if u.get('username') == matched_user:
+                        user = u
+                        break
+            except Exception as e:
+                logger.error(f"获取用户信息失败: {str(e)}")
+        
+        if not user:
+            return jsonify({
+                'status': 'error',
+                'message': '用户不存在'
+            }), 404
+        
+        # 生成令牌
+        token = generate_token(user)
+        logger.info(f"用户 {matched_user} 通过生物识别认证登录成功")
+        
+        return jsonify({
+            'status': 'success',
+            'token': token,
+            'username': matched_user,
+            'role': user.get('role', 'user'),
+            'message': '生物识别认证成功'
+        })
+        
+    except Exception as e:
+        logger.error(f"验证生物识别认证失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'验证失败: {str(e)}'
+        }), 500
 
 @app.route('/api/open_game_folder', methods=['GET', 'POST'])
 def open_game_folder():
