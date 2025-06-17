@@ -93,12 +93,6 @@ const ServerGuide: React.FC = () => {
       name: '我的世界基岩服务端',
       description: '如果想运行 Minecraft 版多人联机服务器，则首先要下载适用于 Windows 或 Ubuntu (Linux) 的 Bedrock 版专属服务器。',
       url: 'https://www.minecraft.net/zh-hans/download/server/bedrock',
-      tags: ['内网穿透', 'nps']
-    },
-    {
-      name: '我的世界基岩服务端',
-      description: '如果想运行 Minecraft 版多人联机服务器，则首先要下载适用于 Windows 或 Ubuntu (Linux) 的 Bedrock 版专属服务器。',
-      url: 'https://www.minecraft.net/zh-hans/download/server/bedrock',
       tags: ['Minecraft', '资源']
     },
     {
