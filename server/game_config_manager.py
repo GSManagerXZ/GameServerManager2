@@ -78,20 +78,25 @@ class GameConfigManager:
             config_file_path = config_schema['meta']['config_file']
             full_config_path = os.path.join(server_path, config_file_path)
             
+            logger.debug(f"正在读取配置文件: {full_config_path}")
+            logger.debug(f"使用解析器: {parser_type}")
+            
             if not os.path.exists(full_config_path):
                 logger.warning(f"配置文件不存在: {full_config_path}")
-                return self._get_default_values(config_schema)
+                return {}
             
             # 根据解析器类型读取配置
             if parser_type in self.supported_parsers:
-                return self.supported_parsers[parser_type](full_config_path, config_schema)
+                result = self.supported_parsers[parser_type](full_config_path, config_schema)
+                logger.debug(f"配置解析结果: {result}")
+                return result
             else:
                 logger.error(f"不支持的解析器类型: {parser_type}")
-                return self._get_default_values(config_schema)
+                return {}
                 
         except Exception as e:
             logger.error(f"读取游戏配置失败: {e}")
-            return self._get_default_values(config_schema)
+            return {}
     
     def save_game_config(self, server_path: str, config_schema: Dict[str, Any], config_data: Dict[str, Any], parser_type: str = 'configobj') -> bool:
         """保存游戏配置文件"""
@@ -139,21 +144,38 @@ class GameConfigManager:
         try:
             import configobj
             config = configobj.ConfigObj(config_path, encoding='utf-8')
+            logger.debug(f"configobj读取到的原始配置: {dict(config)}")
             result = {}
             
             for section in config_schema.get('sections', []):
                 section_key = section['key']
                 result[section_key] = {}
+                logger.debug(f"处理section: {section_key}")
                 
                 if section_key in config:
+                    logger.debug(f"在配置文件中找到section: {section_key}, 内容: {dict(config[section_key])}")
                     for field in section.get('fields', []):
                         field_name = field['name']
+                        logger.debug(f"处理字段: {field_name}")
                         if field_name in config[section_key]:
                             value = config[section_key][field_name]
+                            logger.debug(f"字段 {field_name} 的原始值: {value} (类型: {type(value)})")
                             
                             # 检查是否为嵌套字段
                             if field.get('type') == 'nested':
                                 # 处理嵌套字段，将括号格式转换为字符串数组
+                                if isinstance(value, list):
+                                    logger.debug(f"检测到列表类型的嵌套字段，重新组合: {value}")
+                                    # 检查第一个元素是否以'('开头，最后一个元素是否以')'结尾
+                                    if value and value[0].startswith('(') and value[-1].endswith(')'):
+                                        # 直接拼接列表元素，保留括号
+                                        combined_value = ','.join(value)
+                                    else:
+                                        # 如果不是标准格式，添加括号
+                                        combined_value = '(' + ','.join(value) + ')'
+                                    logger.debug(f"重新组合后的值: {combined_value}")
+                                    value = combined_value
+                                
                                 if isinstance(value, str) and value.startswith('(') and value.endswith(')'):
                                     # 去掉括号并按逗号分割
                                     inner_content = value[1:-1]
@@ -185,8 +207,12 @@ class GameConfigManager:
                                             params.append(current_param.strip())
                                         
                                         value = params
+                                        logger.debug(f"解析后的嵌套字段参数: {value}")
                                     else:
                                         value = []
+                                elif isinstance(value, list):
+                                    # 如果仍然是列表但不是括号格式，直接使用列表
+                                    logger.info(f"嵌套字段保持列表格式: {value}")
                                 else:
                                     value = []
                             else:
@@ -201,19 +227,22 @@ class GameConfigManager:
                                         value = float(value)
                             
                             result[section_key][field_name] = value
+                            logger.debug(f"字段 {field_name} 的最终值: {value}")
                         else:
-                            result[section_key][field_name] = field.get('default', '')
+                            logger.warning(f"字段 {field_name} 在配置文件中不存在")
+                            # 如果字段不存在，不设置默认值，保持字段不存在的状态
                 else:
-                    for field in section.get('fields', []):
-                        result[section_key][field['name']] = field.get('default', '')
+                    # 如果section不存在，创建空的section但不填充默认值
+                    logger.warning(f"section {section_key} 在配置文件中不存在")
+                    pass
                         
             return result
         except ImportError:
             logger.error("configobj库未安装")
-            return self._get_default_values(config_schema)
+            return {}
         except Exception as e:
             logger.error(f"configobj解析失败: {e}")
-            return self._get_default_values(config_schema)
+            return {}
     
     def _parse_with_yaml(self, config_path: str, config_schema: Dict[str, Any]) -> Dict[str, Any]:
         """使用ruamel.yaml解析配置文件"""
@@ -233,15 +262,17 @@ class GameConfigManager:
                 if section_key in config:
                     for field in section.get('fields', []):
                         field_name = field['name']
-                        result[section_key][field_name] = config[section_key].get(field_name, field.get('default', ''))
+                        if field_name in config[section_key]:
+                            result[section_key][field_name] = config[section_key][field_name]
+                        # 如果字段不存在，不设置默认值
                 else:
-                    for field in section.get('fields', []):
-                        result[section_key][field['name']] = field.get('default', '')
+                    # 如果section不存在，创建空的section但不填充默认值
+                    pass
                         
             return result
         except Exception as e:
             logger.error(f"yaml解析失败: {e}")
-            return self._get_default_values(config_schema)
+            return {}
     
     def _parse_with_pyhocon(self, config_path: str, config_schema: Dict[str, Any]) -> Dict[str, Any]:
         """使用pyhocon解析配置文件"""
@@ -257,18 +288,20 @@ class GameConfigManager:
                 if section_key in config:
                     for field in section.get('fields', []):
                         field_name = field['name']
-                        result[section_key][field_name] = config[section_key].get(field_name, field.get('default', ''))
+                        if field_name in config[section_key]:
+                            result[section_key][field_name] = config[section_key][field_name]
+                        # 如果字段不存在，不设置默认值
                 else:
-                    for field in section.get('fields', []):
-                        result[section_key][field['name']] = field.get('default', '')
+                    # 如果section不存在，创建空的section但不填充默认值
+                    pass
                         
             return result
         except ImportError:
             logger.error("pyhocon库未安装")
-            return self._get_default_values(config_schema)
+            return {}
         except Exception as e:
             logger.error(f"pyhocon解析失败: {e}")
-            return self._get_default_values(config_schema)
+            return {}
     
     def _parse_with_unreal(self, config_path: str, config_schema: Dict[str, Any]) -> Dict[str, Any]:
         """使用unreal-ini-parser解析UE游戏配置文件"""
@@ -319,13 +352,10 @@ class GameConfigManager:
                                             except ValueError:
                                                 value = field.get('default', 0.0)
                                     result[section_key][field_name] = value
-                                else:
-                                    result[section_key][field_name] = field.get('default', '')
+                                # 如果字段不存在，不设置默认值
                             break
                     
-                    if not section_found:
-                        for field in section.get('fields', []):
-                            result[section_key][field['name']] = field.get('default', '')
+                    # 如果section不存在，创建空的section但不填充默认值
                             
                 return result
                 
@@ -361,17 +391,16 @@ class GameConfigManager:
                                         except ValueError:
                                             value = field.get('default', 0.0)
                                 result[section_key][field_name] = value
-                            else:
-                                result[section_key][field_name] = field.get('default', '')
+                            # 如果字段不存在，不设置默认值
                     else:
-                        for field in section.get('fields', []):
-                            result[section_key][field['name']] = field.get('default', '')
+                        # 如果section不存在，创建空的section但不填充默认值
+                        pass
                             
                 return result
                 
         except Exception as e:
             logger.error(f"unreal配置解析失败: {e}")
-            return self._get_default_values(config_schema)
+            return {}
     
     def _save_with_configobj(self, config_path: str, config_data: Dict[str, Any], config_schema: Dict[str, Any]) -> bool:
         """使用configobj保存配置文件"""
