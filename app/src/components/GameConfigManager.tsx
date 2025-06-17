@@ -77,7 +77,7 @@ const GameConfigManager: React.FC = () => {
   const [selectedConfig, setSelectedConfig] = useState<string>('');
   const [configSchema, setConfigSchema] = useState<ConfigSchema | null>(null);
   const [configData, setConfigData] = useState<any>(null);
-  const selectedParser = 'configobj'; // 固定使用ConfigObj解析器
+  const [selectedParser, setSelectedParser] = useState<string>('configobj'); // 动态选择解析器
 
   // 加载可用服务端
   const loadServers = async () => {
@@ -115,6 +115,9 @@ const GameConfigManager: React.FC = () => {
       const response = await axios.get(`/api/game-config/schema/${configId}`);
       if (response.data.status === 'success') {
         setConfigSchema(response.data.schema);
+        // 根据schema中的parser设置来选择解析器
+        const parser = response.data.schema?.meta?.parser || 'configobj';
+        setSelectedParser(parser);
       } else {
         message.error(response.data.message || '加载配置文件模板失败');
       }
@@ -151,50 +154,65 @@ const GameConfigManager: React.FC = () => {
         
         // 将配置数据填充到表单
         const formData: any = {};
-        Object.keys(response.data.config_data).forEach(sectionKey => {
-          Object.keys(response.data.config_data[sectionKey]).forEach(fieldKey => {
-            const fieldValue = response.data.config_data[sectionKey][fieldKey];
+        
+        // 遍历schema中定义的所有sections和fields
+        response.data.schema?.sections?.forEach((section: any) => {
+          const sectionKey = section.key;
+          const sectionData = response.data.config_data[sectionKey] || {};
+          
+          section.fields?.forEach((field: any) => {
+            const fieldKey = field.name;
+            const fieldValue = sectionData[fieldKey];
             
-            // 检查是否是嵌套字段（如OptionSettings）
-            const section = response.data.schema?.sections?.find((s: any) => s.key === sectionKey);
-            const field = section?.fields?.find((f: any) => f.name === fieldKey);
-            
-            if (field?.type === 'nested' && field.nested_fields && Array.isArray(fieldValue)) {
-              // 处理嵌套字段数据，解析字符串数组为键值对
+            if (field.type === 'nested' && field.nested_fields) {
+              // 处理嵌套字段数据
               field.nested_fields.forEach((nestedField: any) => {
                 const nestedFieldKey = `${sectionKey}.${fieldKey}.${nestedField.name}`;
                 
-                // 从字符串数组中查找对应的值
-                const matchingValue = fieldValue.find((item: string) => {
-                  if (typeof item === 'string') {
-                    return item.startsWith(`${nestedField.name}=`) || item.startsWith(`(${nestedField.name}=`);
-                  }
-                  return false;
-                });
-                
-                if (matchingValue) {
-                  // 提取值部分
-                  let value = matchingValue.split('=')[1];
-                  if (value) {
-                    // 处理不同类型的值
-                    if (nestedField.type === 'boolean') {
-                      value = value.toLowerCase() === 'true';
-                    } else if (nestedField.type === 'number') {
-                      value = parseFloat(value);
+                if (Array.isArray(fieldValue)) {
+                  // 从字符串数组中查找对应的值
+                  const matchingValue = fieldValue.find((item: string) => {
+                    if (typeof item === 'string') {
+                      return item.startsWith(`${nestedField.name}=`) || item.startsWith(`(${nestedField.name}=`);
                     }
-                    formData[nestedFieldKey] = value;
+                    return false;
+                  });
+                  
+                  if (matchingValue) {
+                    // 提取值部分
+                    let value = matchingValue.split('=')[1];
+                    if (value) {
+                      // 处理不同类型的值
+                      if (nestedField.type === 'boolean') {
+                        value = value.toLowerCase() === 'true';
+                      } else if (nestedField.type === 'number') {
+                        value = parseFloat(value);
+                      }
+                      formData[nestedFieldKey] = value;
+                    }
+                  } else {
+                    // 使用默认值
+                    formData[nestedFieldKey] = nestedField.default;
                   }
                 } else {
-                  // 使用默认值
+                  // 如果没有数据或数据格式不正确，使用默认值
                   formData[nestedFieldKey] = nestedField.default;
                 }
               });
             } else {
-              // 普通字段直接赋值
-              formData[`${sectionKey}.${fieldKey}`] = fieldValue;
+              // 普通字段处理
+              const formFieldKey = `${sectionKey}.${fieldKey}`;
+              if (fieldValue !== undefined) {
+                // 使用实际值
+                formData[formFieldKey] = fieldValue;
+              } else {
+                // 使用默认值
+                formData[formFieldKey] = field.default;
+              }
             }
           });
         });
+        
         form.setFieldsValue(formData);
         
         message.success('配置文件读取成功');
@@ -338,10 +356,10 @@ const GameConfigManager: React.FC = () => {
       inputComponent = <Switch />;
       valuePropName = 'checked';
     } else if (fieldType === 'number') {
-      inputComponent = <InputNumber style={{ width: '100%' }} />;
+      inputComponent = <InputNumber style={{ width: '100%', textAlign: 'center' }} />;
     } else if (fieldType === 'select' && field.options) {
       inputComponent = (
-        <Select style={{ width: '100%' }} placeholder="请选择">
+        <Select style={{ width: '100%', textAlign: 'center' }} placeholder="请选择">
           {field.options.map(option => (
             <Option key={option.value} value={option.value}>
               {option.label}
@@ -355,7 +373,7 @@ const GameConfigManager: React.FC = () => {
         <div key={fieldKey}>
           <Row style={{ marginBottom: 16, alignItems: 'center' }}>
             <Col span={24}>
-              <div style={{ fontWeight: 500, marginBottom: 8, fontSize: 16, color: '#1890ff' }}>
+              <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 16, color: '#1890ff', borderBottom: '1px solid #e6f7ff', paddingBottom: '8px' }}>
                 {field.display}
               </div>
               <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>
@@ -380,10 +398,10 @@ const GameConfigManager: React.FC = () => {
                 nestedInputComponent = <Switch />;
                 nestedValuePropName = 'checked';
               } else if (nestedFieldType === 'number') {
-                nestedInputComponent = <InputNumber style={{ width: '100%' }} />;
+                nestedInputComponent = <InputNumber style={{ width: '100%', textAlign: 'center' }} />;
               } else if (nestedFieldType === 'select' && nestedField.options) {
                 nestedInputComponent = (
-                  <Select style={{ width: '100%' }} placeholder="请选择">
+                  <Select style={{ width: '100%', textAlign: 'center' }} placeholder="请选择">
                     {nestedField.options.map(option => (
                       <Option key={option.value} value={option.value}>
                         {option.label}
@@ -392,32 +410,46 @@ const GameConfigManager: React.FC = () => {
                   </Select>
                 );
               } else {
-                nestedInputComponent = <Input />;
+                nestedInputComponent = <Input style={{ textAlign: 'center' }} />;
               }
               
               return (
-                <Row key={nestedFieldKey} style={{ marginBottom: 12, alignItems: 'center' }}>
+                <Row key={nestedFieldKey} style={{ marginBottom: 12, alignItems: 'center', minHeight: '60px' }}>
                   <Col span={12}>
-                    <div style={{ paddingRight: 16, textAlign: 'right' }}>
-                      <div style={{ fontWeight: 500, marginBottom: 4 }}>
+                    <div style={{ 
+                      paddingRight: 24, 
+                      textAlign: 'center',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'center',
+                      height: '100%',
+                      borderRight: '1px solid #f0f0f0'
+                    }}>
+                      <div style={{ fontWeight: 600, marginBottom: 6, fontSize: '14px', color: '#262626' }}>
                         {nestedField.display}
                       </div>
-                      <div style={{ fontSize: 12, color: '#666', lineHeight: 1.2 }}>
+                      <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4, fontFamily: 'monospace' }}>
                         {nestedField.name}
                       </div>
                       {nestedField.description && (
-                        <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
+                        <div style={{ fontSize: 11, color: '#bfbfbf', lineHeight: 1.4, maxWidth: '200px', margin: '0 auto' }}>
                           {nestedField.description}
                         </div>
                       )}
                     </div>
                   </Col>
                   <Col span={12}>
-                    <div style={{ paddingLeft: 16 }}>
+                    <div style={{ 
+                      paddingLeft: 24,
+                      display: 'flex',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      height: '100%'
+                    }}>
                       <Form.Item
                         name={nestedFieldKey}
                         valuePropName={nestedValuePropName}
-                        style={{ marginBottom: 0 }}
+                        style={{ marginBottom: 0, width: '80%' }}
                       >
                         {nestedInputComponent}
                       </Form.Item>
@@ -430,37 +462,51 @@ const GameConfigManager: React.FC = () => {
         </div>
       );
     } else {
-      inputComponent = <Input />;
+      inputComponent = <Input style={{ textAlign: 'center' }} />;
     }
     
     return (
-      <Row key={fieldKey} style={{ marginBottom: 16, alignItems: 'center' }}>
+      <Row key={fieldKey} style={{ marginBottom: 20, alignItems: 'center', minHeight: '80px', borderBottom: '1px solid #f5f5f5', paddingBottom: '16px' }}>
         <Col span={12}>
-          <div style={{ paddingRight: 16, textAlign: 'right' }}>
-            <div style={{ fontWeight: 500, marginBottom: 4 }}>
+          <div style={{ 
+            paddingRight: 24, 
+            textAlign: 'center',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            height: '100%',
+            borderRight: '2px solid #f0f0f0'
+          }}>
+            <div style={{ fontWeight: 600, marginBottom: 8, fontSize: '16px', color: '#262626' }}>
               {field.display}
             </div>
-            <div style={{ fontSize: 12, color: '#666', lineHeight: 1.2 }}>
+            <div style={{ fontSize: 13, color: '#8c8c8c', marginBottom: 6, fontFamily: 'monospace', backgroundColor: '#f8f8f8', padding: '2px 8px', borderRadius: '4px', display: 'inline-block' }}>
               {field.name}
             </div>
             {field.description && (
-              <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
+              <div style={{ fontSize: 12, color: '#bfbfbf', lineHeight: 1.5, maxWidth: '280px', margin: '0 auto', textAlign: 'center' }}>
                 {field.description}
               </div>
             )}
           </div>
         </Col>
         <Col span={12}>
-          <div style={{ paddingLeft: 16 }}>
-              <Form.Item
-                name={fieldKey}
-                valuePropName={valuePropName}
-                style={{ marginBottom: 0 }}
-              >
-                {inputComponent}
-              </Form.Item>
-            </div>
-          </Col>
+          <div style={{ 
+            paddingLeft: 24,
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            height: '100%'
+          }}>
+            <Form.Item
+              name={fieldKey}
+              valuePropName={valuePropName}
+              style={{ marginBottom: 0, width: '80%' }}
+            >
+              {inputComponent}
+            </Form.Item>
+          </div>
+        </Col>
       </Row>
     );
   };

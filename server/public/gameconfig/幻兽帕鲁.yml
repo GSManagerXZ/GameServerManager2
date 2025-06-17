@@ -1,4 +1,3 @@
-# config_schemas/palworld_optimized.yaml
 meta:
   game_name: "幻兽帕鲁"
   config_file: "Pal/Saved/Config/LinuxServer/PalWorldSettings.ini"

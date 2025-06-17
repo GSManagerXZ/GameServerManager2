@@ -5,7 +5,6 @@ from typing import Dict, List, Any, Optional
 from flask import jsonify
 import logging
 from ruamel.yaml import YAML
-from unreal_ini_parser import IniParser
 from pyhocon import ConfigFactory
 
 logger = logging.getLogger(__name__)
@@ -19,7 +18,7 @@ class GameConfigManager:
             'configobj': self._parse_with_configobj,
             'pyhocon': self._parse_with_pyhocon,
             'ruamel.yaml': self._parse_with_yaml,
-            'unreal-ini-parser': self._parse_with_unreal
+            'properties': self._parse_with_properties
         }
     
     def get_available_configs(self) -> List[Dict[str, str]]:
@@ -78,8 +77,8 @@ class GameConfigManager:
             config_file_path = config_schema['meta']['config_file']
             full_config_path = os.path.join(server_path, config_file_path)
             
-            logger.debug(f"正在读取配置文件: {full_config_path}")
-            logger.debug(f"使用解析器: {parser_type}")
+            logger.info(f"正在读取配置文件: {full_config_path}")
+            logger.info(f"使用解析器: {parser_type}")
             
             if not os.path.exists(full_config_path):
                 logger.warning(f"配置文件不存在: {full_config_path}")
@@ -88,7 +87,7 @@ class GameConfigManager:
             # 根据解析器类型读取配置
             if parser_type in self.supported_parsers:
                 result = self.supported_parsers[parser_type](full_config_path, config_schema)
-                logger.debug(f"配置解析结果: {result}")
+                logger.info(f"配置解析结果: {result}")
                 return result
             else:
                 logger.error(f"不支持的解析器类型: {parser_type}")
@@ -114,8 +113,9 @@ class GameConfigManager:
                 return self._save_with_yaml(full_config_path, config_data, config_schema)
             elif parser_type == 'pyhocon':
                 return self._save_with_pyhocon(full_config_path, config_data, config_schema)
-            elif parser_type == 'unreal-ini-parser':
-                return self._save_with_unreal(full_config_path, config_data, config_schema)
+
+            elif parser_type == 'properties':
+                return self._save_with_properties(full_config_path, config_data, config_schema)
             else:
                 logger.error(f"不支持的解析器类型: {parser_type}")
                 return False
@@ -144,28 +144,28 @@ class GameConfigManager:
         try:
             import configobj
             config = configobj.ConfigObj(config_path, encoding='utf-8')
-            logger.debug(f"configobj读取到的原始配置: {dict(config)}")
+            logger.info(f"configobj读取到的原始配置: {dict(config)}")
             result = {}
             
             for section in config_schema.get('sections', []):
                 section_key = section['key']
                 result[section_key] = {}
-                logger.debug(f"处理section: {section_key}")
+                logger.info(f"处理section: {section_key}")
                 
                 if section_key in config:
-                    logger.debug(f"在配置文件中找到section: {section_key}, 内容: {dict(config[section_key])}")
+                    logger.info(f"在配置文件中找到section: {section_key}, 内容: {dict(config[section_key])}")
                     for field in section.get('fields', []):
                         field_name = field['name']
-                        logger.debug(f"处理字段: {field_name}")
+                        logger.info(f"处理字段: {field_name}")
                         if field_name in config[section_key]:
                             value = config[section_key][field_name]
-                            logger.debug(f"字段 {field_name} 的原始值: {value} (类型: {type(value)})")
+                            logger.info(f"字段 {field_name} 的原始值: {value} (类型: {type(value)})")
                             
                             # 检查是否为嵌套字段
                             if field.get('type') == 'nested':
                                 # 处理嵌套字段，将括号格式转换为字符串数组
                                 if isinstance(value, list):
-                                    logger.debug(f"检测到列表类型的嵌套字段，重新组合: {value}")
+                                    logger.info(f"检测到列表类型的嵌套字段，重新组合: {value}")
                                     # 检查第一个元素是否以'('开头，最后一个元素是否以')'结尾
                                     if value and value[0].startswith('(') and value[-1].endswith(')'):
                                         # 直接拼接列表元素，保留括号
@@ -173,7 +173,7 @@ class GameConfigManager:
                                     else:
                                         # 如果不是标准格式，添加括号
                                         combined_value = '(' + ','.join(value) + ')'
-                                    logger.debug(f"重新组合后的值: {combined_value}")
+                                    logger.info(f"重新组合后的值: {combined_value}")
                                     value = combined_value
                                 
                                 if isinstance(value, str) and value.startswith('(') and value.endswith(')'):
@@ -207,7 +207,7 @@ class GameConfigManager:
                                             params.append(current_param.strip())
                                         
                                         value = params
-                                        logger.debug(f"解析后的嵌套字段参数: {value}")
+                                        logger.info(f"解析后的嵌套字段参数: {value}")
                                     else:
                                         value = []
                                 elif isinstance(value, list):
@@ -227,7 +227,7 @@ class GameConfigManager:
                                         value = float(value)
                             
                             result[section_key][field_name] = value
-                            logger.debug(f"字段 {field_name} 的最终值: {value}")
+                            logger.info(f"字段 {field_name} 的最终值: {value}")
                         else:
                             logger.warning(f"字段 {field_name} 在配置文件中不存在")
                             # 如果字段不存在，不设置默认值，保持字段不存在的状态
@@ -303,104 +303,7 @@ class GameConfigManager:
             logger.error(f"pyhocon解析失败: {e}")
             return {}
     
-    def _parse_with_unreal(self, config_path: str, config_schema: Dict[str, Any]) -> Dict[str, Any]:
-        """使用unreal-ini-parser解析UE游戏配置文件"""
-        try:
-            # 尝试使用unreal-ini-parser库
-            try:
-                
-                
-                parser = IniParser()
-                parser.read(config_path)
-                config_data = parser.sections
-                
-                result = {}
-                for section in config_schema.get('sections', []):
-                    section_key = section['key']
-                    result[section_key] = {}
-                    
-                    # UE配置文件通常使用特殊的section格式，如[/Script/Engine.GameEngine]
-                    # 尝试多种可能的section名称格式
-                    possible_section_names = [
-                        section_key,
-                        f"/Script/{section_key}",
-                        f"/Script/Engine.{section_key}",
-                        f"/Script/Game.{section_key}"
-                    ]
-                    
-                    section_found = False
-                    for possible_name in possible_section_names:
-                        if possible_name in config_data:
-                            section_found = True
-                            for field in section.get('fields', []):
-                                field_name = field['name']
-                                if field_name in config_data[possible_name]:
-                                    value = config_data[possible_name][field_name]
-                                    # UE配置文件的类型转换
-                                    if 'default' in field:
-                                        default_type = type(field['default'])
-                                        if default_type == bool:
-                                            value = str(value).lower() in ('true', '1', 'yes', 'on')
-                                        elif default_type == int:
-                                            try:
-                                                value = int(value)
-                                            except ValueError:
-                                                value = field.get('default', 0)
-                                        elif default_type == float:
-                                            try:
-                                                value = float(value)
-                                            except ValueError:
-                                                value = field.get('default', 0.0)
-                                    result[section_key][field_name] = value
-                                # 如果字段不存在，不设置默认值
-                            break
-                    
-                    # 如果section不存在，创建空的section但不填充默认值
-                            
-                return result
-                
-            except ImportError:
-                logger.warning("unreal-ini-parser库未安装，使用configparser作为fallback")
-                # 使用configparser作为fallback
-                config = configparser.ConfigParser()
-                config.read(config_path, encoding='utf-8')
-                
-                result = {}
-                for section in config_schema.get('sections', []):
-                    section_key = section['key']
-                    result[section_key] = {}
-                    
-                    if section_key in config:
-                        for field in section.get('fields', []):
-                            field_name = field['name']
-                            if field_name in config[section_key]:
-                                value = config[section_key][field_name]
-                                # 类型转换
-                                if 'default' in field:
-                                    default_type = type(field['default'])
-                                    if default_type == bool:
-                                        value = str(value).lower() in ('true', '1', 'yes', 'on')
-                                    elif default_type == int:
-                                        try:
-                                            value = int(value)
-                                        except ValueError:
-                                            value = field.get('default', 0)
-                                    elif default_type == float:
-                                        try:
-                                            value = float(value)
-                                        except ValueError:
-                                            value = field.get('default', 0.0)
-                                result[section_key][field_name] = value
-                            # 如果字段不存在，不设置默认值
-                    else:
-                        # 如果section不存在，创建空的section但不填充默认值
-                        pass
-                            
-                return result
-                
-        except Exception as e:
-            logger.error(f"unreal配置解析失败: {e}")
-            return {}
+
     
     def _save_with_configobj(self, config_path: str, config_data: Dict[str, Any], config_schema: Dict[str, Any]) -> bool:
         """使用configobj保存配置文件"""
@@ -557,86 +460,137 @@ class GameConfigManager:
             logger.error(f"pyhocon保存失败: {e}")
             return False
     
-    def _save_with_unreal(self, config_path: str, config_data: Dict[str, Any], config_schema: Dict[str, Any]) -> bool:
-        """使用unreal格式保存UE游戏配置文件"""
+
+    
+    def _parse_with_properties(self, config_path: str, config_schema: Dict[str, Any]) -> Dict[str, Any]:
+        """使用properties格式解析配置文件（平面键值对格式，无section）"""
         try:
-            # 尝试使用unreal-ini-parser库
-            try:
-                
-                
-                parser = IniParser()
-                
-                # 如果文件存在，先读取现有配置
-                if os.path.exists(config_path):
-                    parser.read(config_path)
-                    existing_config = parser.sections
-                else:
-                    existing_config = {}
-                
-                # 更新配置数据
-                for section_key, section_data in config_data.items():
-                    # UE配置文件通常使用特殊的section格式
-                    # 根据现有配置确定正确的section名称格式
-                    actual_section_name = section_key
-                    
-                    # 检查现有配置中是否有特殊格式的section名称
-                    for existing_section in existing_config.keys():
-                        if (existing_section.endswith(f".{section_key}") or 
-                            existing_section.endswith(f"/{section_key}") or
-                            existing_section == f"/Script/{section_key}" or
-                            existing_section == f"/Script/Engine.{section_key}" or
-                            existing_section == f"/Script/Game.{section_key}"):
-                            actual_section_name = existing_section
-                            break
-                    
-                    if actual_section_name not in existing_config:
-                        existing_config[actual_section_name] = {}
-                    
-                    for field_name, field_value in section_data.items():
-                        # UE配置文件的值格式化
-                        if isinstance(field_value, bool):
-                            formatted_value = "True" if field_value else "False"
-                        elif isinstance(field_value, str) and field_value.strip():
-                            # 字符串值通常需要引号
-                            formatted_value = f'"{field_value}"' if not field_value.startswith('"') else field_value
-                        else:
-                            formatted_value = str(field_value)
+            result = {}
+            
+            # 对于properties文件，我们假设只有一个section
+            if not config_schema.get('sections'):
+                logger.warning("配置模板中没有定义sections")
+                return {}
+            
+            # 获取第一个section作为默认section
+            section = config_schema['sections'][0]
+            section_key = section['key']
+            result[section_key] = {}
+            
+            logger.info(f"处理properties文件section: {section_key}")
+            
+            # 读取properties文件
+            if os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    for line_num, line in enumerate(f, 1):
+                        line = line.strip()
+                        # 跳过空行和注释行
+                        if not line or line.startswith('#') or line.startswith('!'):
+                            continue
                         
-                        existing_config[actual_section_name][field_name] = formatted_value
-                
-                # 保存文件
-                parser.sections = existing_config
-                parser.write(config_path)
-                return True
-                
-            except ImportError:
-                logger.warning("unreal-ini-parser库未安装，使用configparser作为fallback")
-                # 使用configparser作为fallback
-                config = configparser.ConfigParser()
-                
-                # 如果文件存在，先读取现有配置
-                if os.path.exists(config_path):
-                    config.read(config_path, encoding='utf-8')
-                
-                # 更新配置
-                for section_key, section_data in config_data.items():
-                    if not config.has_section(section_key):
-                        config.add_section(section_key)
-                    for field_name, field_value in section_data.items():
-                        # UE配置文件的值格式化
-                        if isinstance(field_value, bool):
-                            formatted_value = "True" if field_value else "False"
+                        # 解析键值对
+                        if '=' in line:
+                            key, value = line.split('=', 1)
+                            key = key.strip()
+                            value = value.strip()
+                            
+                            # 查找对应的字段配置
+                            field_config = None
+                            for field in section.get('fields', []):
+                                if field['name'] == key:
+                                    field_config = field
+                                    break
+                            
+                            if field_config:
+                                # 根据字段类型转换值
+                                field_type = field_config.get('type', 'string')
+                                try:
+                                    if field_type == 'boolean':
+                                        converted_value = value.lower() in ('true', '1', 'yes', 'on')
+                                    elif field_type == 'number':
+                                        # 尝试转换为整数，如果失败则转换为浮点数
+                                        try:
+                                            converted_value = int(value)
+                                        except ValueError:
+                                            converted_value = float(value)
+                                    else:
+                                        converted_value = value
+                                    
+                                    result[section_key][key] = converted_value
+                                    logger.info(f"解析字段 {key} = {converted_value} (类型: {field_type})")
+                                except (ValueError, TypeError) as e:
+                                    logger.warning(f"字段 {key} 类型转换失败: {e}，使用原始值")
+                                    result[section_key][key] = value
+                            else:
+                                logger.info(f"字段 {key} 不在配置模板中，跳过")
                         else:
-                            formatted_value = str(field_value)
-                        config.set(section_key, field_name, formatted_value)
-                
-                # 保存文件
-                with open(config_path, 'w', encoding='utf-8') as f:
-                    config.write(f)
-                return True
-                
+                            logger.warning(f"第{line_num}行格式不正确: {line}")
+            else:
+                logger.warning(f"配置文件不存在: {config_path}")
+            
+            logger.info(f"properties解析结果: {result}")
+            return result
+            
         except Exception as e:
-            logger.error(f"unreal配置保存失败: {e}")
+             logger.error(f"properties配置解析失败: {e}")
+             return {}
+    
+    def _save_with_properties(self, config_path: str, config_data: Dict[str, Any], config_schema: Dict[str, Any]) -> bool:
+        """使用properties格式保存配置文件（平面键值对格式，无section）"""
+        try:
+            # 对于properties文件，我们假设只有一个section
+            if not config_schema.get('sections'):
+                logger.warning("配置模板中没有定义sections")
+                return False
+            
+            # 获取第一个section作为默认section
+            section = config_schema['sections'][0]
+            section_key = section['key']
+            
+            logger.info(f"保存properties文件section: {section_key}")
+            
+            # 准备要写入的内容
+            lines = []
+            
+            # 添加文件头注释
+            lines.append("# Minecraft Bedrock Server Configuration")
+            lines.append("# Generated by GameServerManager")
+            lines.append("")
+            
+            if section_key in config_data:
+                section_data = config_data[section_key]
+                
+                # 按照schema中字段的顺序写入
+                for field in section.get('fields', []):
+                    field_name = field['name']
+                    if field_name in section_data:
+                        value = section_data[field_name]
+                        
+                        # 添加字段描述作为注释
+                        if field.get('description'):
+                            lines.append(f"# {field.get('display', field_name)}: {field['description']}")
+                        
+                        # 根据字段类型格式化值
+                        field_type = field.get('type', 'string')
+                        if field_type == 'boolean':
+                            formatted_value = 'true' if value else 'false'
+                        elif field_type == 'number':
+                            formatted_value = str(value)
+                        else:
+                            formatted_value = str(value)
+                        
+                        lines.append(f"{field_name}={formatted_value}")
+                        lines.append("")  # 空行分隔
+            
+            # 写入文件
+            with open(config_path, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(lines))
+            
+            logger.info(f"properties配置保存成功: {config_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"properties配置保存失败: {e}")
             return False
 
 # 全局实例
