@@ -81,17 +81,24 @@ class GameConfigManager:
             config_file_path = config_schema['meta']['config_file']
             full_config_path = os.path.join(server_path, config_file_path)
             
-            logger.info(f"正在读取配置文件: {full_config_path}")
-            logger.info(f"使用解析器: {parser_type}")
+            logger.debug(f"正在读取配置文件: {full_config_path}")
+            logger.debug(f"使用解析器: {parser_type}")
             
             if not os.path.exists(full_config_path):
-                logger.warning(f"配置文件不存在: {full_config_path}")
-                return {}
+                logger.warning(f"配置文件不存在: {full_config_path}，正在创建默认配置文件")
+                # 获取默认配置值
+                default_config = self._get_default_values(config_schema)
+                # 创建配置文件
+                if self.save_game_config(server_path, config_schema, default_config, parser_type):
+                    logger.info(f"已创建默认配置文件: {full_config_path}")
+                else:
+                    logger.error(f"创建默认配置文件失败: {full_config_path}")
+                    return {}
             
             # 根据解析器类型读取配置
             if parser_type in self.supported_parsers:
                 result = self.supported_parsers[parser_type](full_config_path, config_schema)
-                logger.info(f"配置解析结果: {result}")
+                logger.debug(f"配置解析结果: {result}")
                 return result
             else:
                 logger.error(f"不支持的解析器类型: {parser_type}")
@@ -152,28 +159,28 @@ class GameConfigManager:
         try:
             import configobj
             config = configobj.ConfigObj(config_path, encoding='utf-8')
-            logger.info(f"configobj读取到的原始配置: {dict(config)}")
+            logger.debug(f"configobj读取到的原始配置: {dict(config)}")
             result = {}
             
             for section in config_schema.get('sections', []):
                 section_key = section.get('key', 'default')
                 result[section_key] = {}
-                logger.info(f"处理section: {section_key}")
+                logger.debug(f"处理section: {section_key}")
                 
                 if section_key in config:
-                    logger.info(f"在配置文件中找到section: {section_key}, 内容: {dict(config[section_key])}")
+                    logger.debug(f"在配置文件中找到section: {section_key}, 内容: {dict(config[section_key])}")
                     for field in section.get('fields', []):
                         field_name = field['name']
-                        logger.info(f"处理字段: {field_name}")
+                        logger.debug(f"处理字段: {field_name}")
                         if field_name in config[section_key]:
                             value = config[section_key][field_name]
-                            logger.info(f"字段 {field_name} 的原始值: {value} (类型: {type(value)})")
+                            logger.debug(f"字段 {field_name} 的原始值: {value} (类型: {type(value)})")
                             
                             # 检查是否为嵌套字段
                             if field.get('type') == 'nested':
                                 # 处理嵌套字段，将括号格式转换为字符串数组
                                 if isinstance(value, list):
-                                    logger.info(f"检测到列表类型的嵌套字段，重新组合: {value}")
+                                    logger.debug(f"检测到列表类型的嵌套字段，重新组合: {value}")
                                     # 检查第一个元素是否以'('开头，最后一个元素是否以')'结尾
                                     if value and value[0].startswith('(') and value[-1].endswith(')'):
                                         # 直接拼接列表元素，保留括号
@@ -181,7 +188,7 @@ class GameConfigManager:
                                     else:
                                         # 如果不是标准格式，添加括号
                                         combined_value = '(' + ','.join(value) + ')'
-                                    logger.info(f"重新组合后的值: {combined_value}")
+                                    logger.debug(f"重新组合后的值: {combined_value}")
                                     value = combined_value
                                 
                                 if isinstance(value, str) and value.startswith('(') and value.endswith(')'):
@@ -215,12 +222,12 @@ class GameConfigManager:
                                             params.append(current_param.strip())
                                         
                                         value = params
-                                        logger.info(f"解析后的嵌套字段参数: {value}")
+                                        logger.debug(f"解析后的嵌套字段参数: {value}")
                                     else:
                                         value = []
                                 elif isinstance(value, list):
                                     # 如果仍然是列表但不是括号格式，直接使用列表
-                                    logger.info(f"嵌套字段保持列表格式: {value}")
+                                    logger.debug(f"嵌套字段保持列表格式: {value}")
                                 else:
                                     value = []
                             else:
@@ -235,7 +242,7 @@ class GameConfigManager:
                                         value = float(value)
                             
                             result[section_key][field_name] = value
-                            logger.info(f"字段 {field_name} 的最终值: {value}")
+                            logger.debug(f"字段 {field_name} 的最终值: {value}")
                         else:
                             logger.warning(f"字段 {field_name} 在配置文件中不存在")
                             # 如果字段不存在，不设置默认值，保持字段不存在的状态
@@ -492,7 +499,7 @@ class GameConfigManager:
             section_key = section.get('key', 'default')
             result[section_key] = {}
             
-            logger.info(f"处理properties文件section: {section_key}")
+            logger.debug(f"处理properties文件section: {section_key}")
             
             # 读取properties文件
             if os.path.exists(config_path):
@@ -532,18 +539,18 @@ class GameConfigManager:
                                         converted_value = value
                                     
                                     result[section_key][key] = converted_value
-                                    logger.info(f"解析字段 {key} = {converted_value} (类型: {field_type})")
+                                    logger.debug(f"解析字段 {key} = {converted_value} (类型: {field_type})")
                                 except (ValueError, TypeError) as e:
                                     logger.warning(f"字段 {key} 类型转换失败: {e}，使用原始值")
                                     result[section_key][key] = value
                             else:
-                                logger.info(f"字段 {key} 不在配置模板中，跳过")
+                                logger.debug(f"字段 {key} 不在配置模板中，跳过")
                         else:
                             logger.warning(f"第{line_num}行格式不正确: {line}")
             else:
                 logger.warning(f"配置文件不存在: {config_path}")
             
-            logger.info(f"properties解析结果: {result}")
+            logger.debug(f"properties解析结果: {result}")
             return result
             
         except Exception as e:
@@ -562,7 +569,7 @@ class GameConfigManager:
             section = config_schema['sections'][0]
             section_key = section.get('key', 'default')
             
-            logger.info(f"保存properties文件section: {section_key}")
+            logger.debug(f"保存properties文件section: {section_key}")
             
             # 准备要写入的内容
             lines = []
@@ -601,7 +608,7 @@ class GameConfigManager:
             with open(config_path, 'w', encoding='utf-8') as f:
                 f.write('\n'.join(lines))
             
-            logger.info(f"properties配置保存成功: {config_path}")
+            logger.debug(f"properties配置保存成功: {config_path}")
             return True
             
         except Exception as e:
@@ -654,13 +661,13 @@ class GameConfigManager:
                                         value = float(value)
                             
                             result[section_key][field_name] = value
-                            logger.info(f"JSON解析字段 {field_name} = {value}")
+                            logger.debug(f"JSON解析字段 {field_name} = {value}")
                         # 如果字段不存在，不设置默认值
                 else:
                     # 如果section不存在，创建空的section但不填充默认值
                     pass
                         
-            logger.info(f"JSON解析结果: {result}")
+            logger.debug(f"JSON解析结果: {result}")
             return result
         except Exception as e:
             logger.error(f"JSON解析失败: {e}")
@@ -726,7 +733,7 @@ class GameConfigManager:
             with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(processed_data, f, indent=2, ensure_ascii=False)
             
-            logger.info(f"JSON配置保存成功: {config_path}")
+            logger.debug(f"JSON配置保存成功: {config_path}")
             return True
         except Exception as e:
             logger.error(f"JSON保存失败: {e}")
@@ -781,10 +788,10 @@ class GameConfigManager:
                                     value = float(value)
                         
                         result[section_key][field_name] = value
-                        logger.info(f"TOML解析字段 {field_name} = {value}")
+                        logger.debug(f"TOML解析字段 {field_name} = {value}")
                     # 如果字段不存在，不设置默认值
                         
-            logger.info(f"TOML解析结果: {result}")
+            logger.debug(f"TOML解析结果: {result}")
             return result
         except Exception as e:
             logger.error(f"TOML解析失败: {e}")
