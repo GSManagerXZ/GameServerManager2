@@ -7,6 +7,7 @@ from flask import jsonify
 import logging
 from ruamel.yaml import YAML
 from pyhocon import ConfigFactory
+import toml
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,8 @@ class GameConfigManager:
             'pyhocon': self._parse_with_pyhocon,
             'ruamel.yaml': self._parse_with_yaml,
             'properties': self._parse_with_properties,
-            'json': self._parse_with_json
+            'json': self._parse_with_json,
+            'toml': self._parse_with_toml
         }
     
     def get_available_configs(self) -> List[Dict[str, str]]:
@@ -120,6 +122,8 @@ class GameConfigManager:
                 return self._save_with_properties(full_config_path, config_data, config_schema)
             elif parser_type == 'json':
                 return self._save_with_json(full_config_path, config_data, config_schema)
+            elif parser_type == 'toml':
+                return self._save_with_toml(full_config_path, config_data, config_schema)
             else:
                 logger.error(f"不支持的解析器类型: {parser_type}")
                 return False
@@ -133,7 +137,7 @@ class GameConfigManager:
         result = {}
         
         for section in config_schema.get('sections', []):
-            section_key = section['key']
+            section_key = section.get('key', 'default')
             result[section_key] = {}
             
             for field in section.get('fields', []):
@@ -152,7 +156,7 @@ class GameConfigManager:
             result = {}
             
             for section in config_schema.get('sections', []):
-                section_key = section['key']
+                section_key = section.get('key', 'default')
                 result[section_key] = {}
                 logger.info(f"处理section: {section_key}")
                 
@@ -260,14 +264,17 @@ class GameConfigManager:
             
             result = {}
             for section in config_schema.get('sections', []):
-                section_key = section['key']
+                # 检查是否有key字段，如果没有则使用默认的section名称
+                section_key = section.get('key', 'default')
                 result[section_key] = {}
                 
-                if section_key in config:
-                    for field in section.get('fields', []):
-                        field_name = field['name']
-                        if field_name in config[section_key]:
-                            result[section_key][field_name] = config[section_key][field_name]
+                # 如果有key字段，从对应的section读取；否则从根级别读取
+                config_source = config.get(section_key, {}) if 'key' in section else config
+                
+                for field in section.get('fields', []):
+                    field_name = field['name']
+                    if field_name in config_source:
+                         value = config_source[field_name]
                         # 如果字段不存在，不设置默认值
                 else:
                     # 如果section不存在，创建空的section但不填充默认值
@@ -286,7 +293,7 @@ class GameConfigManager:
             
             result = {}
             for section in config_schema.get('sections', []):
-                section_key = section['key']
+                section_key = section.get('key', 'default')
                 result[section_key] = {}
                 
                 if section_key in config:
@@ -322,7 +329,9 @@ class GameConfigManager:
                 # 获取对应的schema section
                 schema_section = None
                 for section in config_schema.get('sections', []):
-                    if section['key'] == section_key:
+                    # 检查是否有key字段，如果没有则使用默认匹配
+                    section_schema_key = section.get('key', 'default')
+                    if section_schema_key == section_key:
                         schema_section = section
                         break
                 
@@ -381,7 +390,9 @@ class GameConfigManager:
                 # 获取对应的schema section
                 schema_section = None
                 for section in config_schema.get('sections', []):
-                    if section['key'] == section_key:
+                    # 检查是否有key字段，如果没有则使用默认匹配
+                    section_schema_key = section.get('key', 'default')
+                    if section_schema_key == section_key:
                         schema_section = section
                         break
                 
@@ -478,7 +489,7 @@ class GameConfigManager:
             
             # 获取第一个section作为默认section
             section = config_schema['sections'][0]
-            section_key = section['key']
+            section_key = section.get('key', 'default')
             result[section_key] = {}
             
             logger.info(f"处理properties文件section: {section_key}")
@@ -549,7 +560,7 @@ class GameConfigManager:
             
             # 获取第一个section作为默认section
             section = config_schema['sections'][0]
-            section_key = section['key']
+            section_key = section.get('key', 'default')
             
             logger.info(f"保存properties文件section: {section_key}")
             
@@ -605,7 +616,7 @@ class GameConfigManager:
             
             result = {}
             for section in config_schema.get('sections', []):
-                section_key = section['key']
+                section_key = section.get('key', 'default')
                 result[section_key] = {}
                 
                 if section_key in config:
@@ -667,7 +678,9 @@ class GameConfigManager:
                 # 获取对应的schema section
                 schema_section = None
                 for section in config_schema.get('sections', []):
-                    if section['key'] == section_key:
+                    # 检查是否有key字段，如果没有则使用默认匹配
+                    section_schema_key = section.get('key', 'default')
+                    if section_schema_key == section_key:
                         schema_section = section
                         break
                 
@@ -717,6 +730,135 @@ class GameConfigManager:
             return True
         except Exception as e:
             logger.error(f"JSON保存失败: {e}")
+            return False
+    
+    def _parse_with_toml(self, config_path: str, config_schema: Dict[str, Any]) -> Dict[str, Any]:
+        """使用TOML格式解析配置文件"""
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = toml.load(f)
+            
+            result = {}
+            for section in config_schema.get('sections', []):
+                # 检查是否有key字段，如果没有则使用默认的section名称
+                section_key = section.get('key', 'default')
+                result[section_key] = {}
+                
+                # 如果有key字段，从对应的section读取；否则从根级别读取
+                config_source = config.get(section_key, {}) if 'key' in section else config
+                
+                for field in section.get('fields', []):
+                    field_name = field['name']
+                    if field_name in config_source:
+                        value = config_source[field_name]
+                        
+                        # 检查是否为嵌套字段
+                        if field.get('type') == 'nested':
+                            # TOML中的嵌套字段可能是表格或数组
+                            if isinstance(value, dict):
+                                # 将对象转换为键值对数组
+                                nested_array = []
+                                for k, v in value.items():
+                                    if isinstance(v, str) and ' ' in v:
+                                        nested_array.append(f'{k}="{v}"')
+                                    else:
+                                        nested_array.append(f'{k}={v}')
+                                value = nested_array
+                            elif isinstance(value, list):
+                                # 如果已经是数组，直接使用
+                                pass
+                            else:
+                                value = []
+                        else:
+                            # 普通字段的类型转换
+                            if 'default' in field:
+                                default_type = type(field['default'])
+                                if default_type == bool and not isinstance(value, bool):
+                                    value = str(value).lower() in ('true', '1', 'yes', 'on')
+                                elif default_type == int and not isinstance(value, int):
+                                    value = int(value)
+                                elif default_type == float and not isinstance(value, (int, float)):
+                                    value = float(value)
+                        
+                        result[section_key][field_name] = value
+                        logger.info(f"TOML解析字段 {field_name} = {value}")
+                    # 如果字段不存在，不设置默认值
+                        
+            logger.info(f"TOML解析结果: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"TOML解析失败: {e}")
+            return {}
+    
+    def _save_with_toml(self, config_path: str, config_data: Dict[str, Any], config_schema: Dict[str, Any]) -> bool:
+        """使用TOML格式保存配置文件"""
+        try:
+            final_data_to_dump = {}
+
+            for section_key, section_data in config_data.items():
+                
+                # Find the corresponding section in the schema
+                schema_section = None
+                for s in config_schema.get('sections', []):
+                    if s.get('key', 'default') == section_key:
+                        schema_section = s
+                        break
+                
+                has_key_in_schema = schema_section and 'key' in schema_section
+
+                # Process the data for the current section
+                processed_section_data = {}
+                for field_name, field_value in section_data.items():
+                    # 检查是否为嵌套字段
+                    field_schema = None
+                    if schema_section:
+                        for field in schema_section.get('fields', []):
+                            if field['name'] == field_name:
+                                field_schema = field
+                                break
+                    
+                    if field_schema and field_schema.get('type') == 'nested':
+                        # 处理嵌套字段，将字符串数组转换为TOML表格
+                        if isinstance(field_value, list):
+                            nested_obj = {}
+                            for element in field_value:
+                                if '=' in element:
+                                    key, value = element.split('=', 1)
+                                    # 去掉可能的引号
+                                    if value.startswith('"') and value.endswith('"'):
+                                        value = value[1:-1]
+                                    
+                                    # 尝试转换为合适的类型
+                                    try:
+                                        if value.lower() in ('true', 'false'):
+                                            nested_obj[key] = value.lower() == 'true'
+                                        elif value.isdigit():
+                                            nested_obj[key] = int(value)
+                                        elif '.' in value and value.replace('.', '').isdigit():
+                                            nested_obj[key] = float(value)
+                                        else:
+                                            nested_obj[key] = value
+                                    except:
+                                        nested_obj[key] = value
+                            processed_section_data[field_name] = nested_obj
+                        else:
+                            processed_section_data[field_name] = field_value
+                    else:
+                        processed_section_data[field_name] = field_value
+
+                if has_key_in_schema:
+                    final_data_to_dump[section_key] = processed_section_data
+                else:
+                    final_data_to_dump.update(processed_section_data)
+
+            # 保存为TOML文件
+            with open(config_path, 'w', encoding='utf-8') as f:
+                toml.dump(final_data_to_dump, f)
+            
+            logger.info(f"TOML配置保存成功: {config_path}")
+            return True
+        except Exception as e:
+            logger.error(f"TOML保存失败: {e}")
             return False
 
 # 全局实例

@@ -145,17 +145,17 @@ sections:
             label: "snappy"
         description: "确定用于网络的压缩算法"
       - name: "server-authoritative-movement-strict"
-        display: "严格服务器权威移动"
+        display: "严格服务器权限移动"
         default: false
         type: "boolean"
         description: "是否对玩家位置更严格，减少对客户端信息的宽容度"
       - name: "server-authoritative-dismount-strict"
-        display: "严格服务器权威下马"
+        display: "严格服务器权限下马"
         default: false
         type: "boolean"
         description: "是否对玩家下马位置更严格"
       - name: "server-authoritative-entity-interactions-strict"
-        display: "严格服务器权威实体交互"
+        display: "严格服务器权限实体交互"
         default: false
         type: "boolean"
         description: "是否对实体交互更严格"
@@ -170,7 +170,7 @@ sections:
         type: "number"
         description: "玩家攻击方向和视线方向可以相差的程度"
       - name: "server-authoritative-block-breaking-pick-range-scalar"
-        display: "服务器权威方块破坏范围标量【0.1到5】"
+        display: "服务器权限方块破坏范围标量【0.1到5】"
         default: 1.5
         type: "number"
         description: "服务器计算方块挖掘操作的范围倍数"
