@@ -22,7 +22,8 @@ import {
   ReloadOutlined,
   SettingOutlined,
   InfoCircleOutlined,
-  UndoOutlined
+  UndoOutlined,
+  UpOutlined
 } from '@ant-design/icons';
 import axios from 'axios';
 
@@ -78,6 +79,7 @@ const GameConfigManager: React.FC = () => {
   const [configSchema, setConfigSchema] = useState<ConfigSchema | null>(null);
   const [configData, setConfigData] = useState<any>(null);
   const [selectedParser, setSelectedParser] = useState<string>('configobj'); // 动态选择解析器
+  const [showBackToTop, setShowBackToTop] = useState(false);
 
   // 加载可用服务端
   const loadServers = async () => {
@@ -511,6 +513,24 @@ const GameConfigManager: React.FC = () => {
     );
   };
 
+  // 回到顶端功能
+  const scrollToTop = () => {
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth'
+    });
+  };
+
+  // 监听滚动事件，控制回到顶端按钮显示
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowBackToTop(window.pageYOffset > 300);
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
   // 组件初始化
   useEffect(() => {
     loadServers();
@@ -647,6 +667,33 @@ const GameConfigManager: React.FC = () => {
             </Text>
           </div>
         </Card>
+      )}
+
+      {/* 回到顶端按钮 */}
+      {showBackToTop && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: '50px',
+            right: '50px',
+            zIndex: 1000,
+            cursor: 'pointer'
+          }}
+        >
+          <Button
+            type="primary"
+            shape="circle"
+            size="large"
+            icon={<UpOutlined />}
+            onClick={scrollToTop}
+            style={{
+              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+              backgroundColor: '#1890ff',
+              borderColor: '#1890ff'
+            }}
+            title="回到顶端"
+          />
+        </div>
       )}
     </div>
   );
