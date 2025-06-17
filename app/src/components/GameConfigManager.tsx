@@ -361,7 +361,16 @@ const GameConfigManager: React.FC = () => {
       inputComponent = <InputNumber style={{ width: '100%', textAlign: 'center' }} />;
     } else if (fieldType === 'select' && field.options) {
       inputComponent = (
-        <Select style={{ width: '100%', textAlign: 'center' }} placeholder="请选择">
+        <Select 
+          showSearch
+          allowClear
+          style={{ width: '100%', textAlign: 'center' }} 
+          placeholder="请选择或输入选项"
+          listHeight={320}
+          filterOption={(input, option) =>
+            option?.children?.toString().toLowerCase().includes(input.toLowerCase()) ?? false
+          }
+        >
           {field.options.map(option => (
             <Option key={option.value} value={option.value}>
               {option.label}
@@ -403,7 +412,16 @@ const GameConfigManager: React.FC = () => {
                 nestedInputComponent = <InputNumber style={{ width: '100%', textAlign: 'center' }} />;
               } else if (nestedFieldType === 'select' && nestedField.options) {
                 nestedInputComponent = (
-                  <Select style={{ width: '100%', textAlign: 'center' }} placeholder="请选择">
+                  <Select 
+                    showSearch
+                    allowClear
+                    style={{ width: '100%', textAlign: 'center' }} 
+                    placeholder="请选择或输入选项"
+                    listHeight={320}
+                    filterOption={(input, option) =>
+                      option?.children?.toString().toLowerCase().includes(input.toLowerCase()) ?? false
+                    }
+                  >
                     {nestedField.options.map(option => (
                       <Option key={option.value} value={option.value}>
                         {option.label}
@@ -563,10 +581,16 @@ const GameConfigManager: React.FC = () => {
           <Col span={12}>
             <Form.Item label="选择服务端">
               <Select
-                placeholder="请选择服务端"
+                showSearch
+                allowClear
+                placeholder="请选择或输入服务端名称"
                 value={selectedServer}
                 onChange={setSelectedServer}
                 style={{ width: '100%' }}
+                listHeight={320}
+                filterOption={(input, option) =>
+                  option?.children?.toString().toLowerCase().includes(input.toLowerCase()) ?? false
+                }
               >
                 {servers.map(server => (
                   <Option key={server.id} value={server.id}>
@@ -580,10 +604,16 @@ const GameConfigManager: React.FC = () => {
           <Col span={12}>
             <Form.Item label="配置文件类型">
               <Select
-                placeholder="请选择配置文件"
+                showSearch
+                allowClear
+                placeholder="请选择或输入配置文件类型"
                 value={selectedConfig}
                 onChange={setSelectedConfig}
                 style={{ width: '100%' }}
+                listHeight={320}
+                filterOption={(input, option) =>
+                  option?.children?.toString().toLowerCase().includes(input.toLowerCase()) ?? false
+                }
               >
                 {gameConfigs.map(config => (
                   <Option key={config.id} value={config.id}>
