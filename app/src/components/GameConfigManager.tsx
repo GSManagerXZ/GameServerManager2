@@ -21,7 +21,8 @@ import {
   SaveOutlined,
   ReloadOutlined,
   SettingOutlined,
-  InfoCircleOutlined
+  InfoCircleOutlined,
+  UndoOutlined
 } from '@ant-design/icons';
 import axios from 'axios';
 
@@ -206,6 +207,39 @@ const GameConfigManager: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // 恢复默认值
+  const resetToDefaults = () => {
+    if (!configSchema) {
+      message.warning('请先读取配置文件');
+      return;
+    }
+
+    const defaultFormData: any = {};
+    
+    configSchema.sections.forEach(section => {
+      section.fields.forEach(field => {
+        if (field.type === 'nested' && field.nested_fields) {
+          // 处理嵌套字段的默认值
+          field.nested_fields.forEach((nestedField: any) => {
+            const nestedFieldKey = `${section.key}.${field.name}.${nestedField.name}`;
+            if (nestedField.default !== undefined) {
+              defaultFormData[nestedFieldKey] = nestedField.default;
+            }
+          });
+        } else {
+          // 普通字段的默认值
+          const fieldKey = `${section.key}.${field.name}`;
+          if (field.default !== undefined) {
+            defaultFormData[fieldKey] = field.default;
+          }
+        }
+      });
+    });
+    
+    form.setFieldsValue(defaultFormData);
+    message.success('已恢复为默认值');
   };
 
   // 保存配置文件
@@ -514,6 +548,15 @@ const GameConfigManager: React.FC = () => {
             disabled={!configSchema || !configData}
           >
             保存配置文件
+          </Button>
+          
+          <Button
+            type="default"
+            icon={<UndoOutlined />}
+            onClick={resetToDefaults}
+            disabled={!configSchema}
+          >
+            恢复默认值
           </Button>
         </Space>
       </Card>
