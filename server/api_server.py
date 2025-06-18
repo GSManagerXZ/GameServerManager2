@@ -52,6 +52,8 @@ from java_installer import install_java_worker
 from docker_manager import docker_manager
 # 导入Minecraft整合包安装器
 from minecraft_modpack_installer import MinecraftModpackInstaller
+# 导入网易云音乐播放器
+from Wangyi import NeteaseMusicPlayer
 
 # 输出管理函数
 def add_server_output(game_id, message, max_lines=500):
@@ -128,6 +130,9 @@ manually_stopped_servers = set()  # 存储人工停止的服务器ID
 
 # 添加一个全局变量来跟踪人工停止的内网穿透
 manually_stopped_frps = set()  # 存储人工停止的内网穿透ID
+
+# 网易云音乐播放器实例
+netease_player = None
 
 app = Flask(__name__, static_folder='../app/dist')
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # 禁用缓存，确保始终获取最新文件
@@ -9677,6 +9682,231 @@ def get_available_servers():
         return jsonify({
             'status': 'error',
             'message': f'获取可用服务端失败: {str(e)}'
+        }), 500
+
+# 网易云音乐相关API接口
+@app.route('/api/netease/load_playlist', methods=['POST'])
+@auth_required
+def load_netease_playlist():
+    """加载网易云音乐歌单"""
+    global netease_player
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'status': 'error',
+                'message': '请求数据不能为空'
+            }), 400
+        
+        playlist_id = data.get('playlist_id')
+        if not playlist_id:
+            return jsonify({
+                'status': 'error',
+                'message': '歌单ID不能为空'
+            }), 400
+        
+        # 初始化播放器（如果还没有初始化）
+        if netease_player is None:
+            netease_player = NeteaseMusicPlayer()
+        
+        # 加载歌单
+        success = netease_player.load_playlist(playlist_id)
+        
+        if success:
+            # 获取歌单信息，包含播放链接
+            songs = []
+            for song in netease_player.playlist:
+                # 获取播放链接
+                song_url = netease_player.get_song_url(song['id'])
+                songs.append({
+                    'id': song['id'],
+                    'name': song['name'],
+                    'artist': song['artist'],
+                    'duration': song['duration'],
+                    'url': song_url  # 添加播放链接
+                })
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'成功加载歌单，共 {len(songs)} 首歌曲',
+                'songs': songs
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': '加载歌单失败，请检查歌单ID是否正确'
+            }), 400
+        
+    except Exception as e:
+        logger.error(f"加载网易云歌单失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'加载歌单失败: {str(e)}'
+        }), 500
+
+@app.route('/api/netease/play', methods=['POST'])
+@auth_required
+def play_netease_music():
+    """播放网易云音乐"""
+    global netease_player
+    try:
+        if netease_player is None:
+            return jsonify({
+                'status': 'error',
+                'message': '请先加载歌单'
+            }), 400
+        
+        data = request.get_json()
+        song_index = data.get('song_index') if data else None
+        
+        success = netease_player.play_song(song_index)
+        
+        if success:
+            current_song = netease_player.current_song
+            return jsonify({
+                'status': 'success',
+                'message': '开始播放',
+                'current_song': {
+                    'id': current_song['id'],
+                    'name': current_song['name'],
+                    'artist': current_song['artist'],
+                    'duration': current_song['duration'],
+                    'url': current_song.get('url')  # 包含播放链接
+                } if current_song else None
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': '播放失败'
+            }), 400
+        
+    except Exception as e:
+        logger.error(f"播放网易云音乐失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'播放失败: {str(e)}'
+        }), 500
+
+@app.route('/api/netease/pause', methods=['POST'])
+@auth_required
+def pause_netease_music():
+    """暂停网易云音乐"""
+    global netease_player
+    try:
+        if netease_player is None:
+            return jsonify({
+                'status': 'error',
+                'message': '播放器未初始化'
+            }), 400
+        
+        netease_player.pause()
+        
+        return jsonify({
+            'status': 'success',
+            'message': '已暂停播放'
+        })
+        
+    except Exception as e:
+        logger.error(f"暂停网易云音乐失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'暂停失败: {str(e)}'
+        }), 500
+
+@app.route('/api/netease/resume', methods=['POST'])
+@auth_required
+def resume_netease_music():
+    """恢复网易云音乐播放"""
+    global netease_player
+    try:
+        if netease_player is None:
+            return jsonify({
+                'status': 'error',
+                'message': '播放器未初始化'
+            }), 400
+        
+        netease_player.resume()
+        
+        return jsonify({
+            'status': 'success',
+            'message': '已恢复播放'
+        })
+        
+    except Exception as e:
+        logger.error(f"恢复网易云音乐播放失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'恢复播放失败: {str(e)}'
+        }), 500
+
+@app.route('/api/netease/stop', methods=['POST'])
+@auth_required
+def stop_netease_music():
+    """停止网易云音乐播放"""
+    global netease_player
+    try:
+        if netease_player is None:
+            return jsonify({
+                'status': 'error',
+                'message': '播放器未初始化'
+            }), 400
+        
+        netease_player.stop()
+        
+        return jsonify({
+            'status': 'success',
+            'message': '已停止播放'
+        })
+        
+    except Exception as e:
+        logger.error(f"停止网易云音乐播放失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'停止播放失败: {str(e)}'
+        }), 500
+
+@app.route('/api/netease/status', methods=['GET'])
+@auth_required
+def get_netease_music_status():
+    """获取网易云音乐播放状态"""
+    global netease_player
+    try:
+        if netease_player is None:
+            return jsonify({
+                'status': 'success',
+                'data': {
+                    'is_playing': False,
+                    'is_paused': False,
+                    'current_song': None,
+                    'playlist_length': 0,
+                    'current_index': 0
+                }
+            })
+        
+        current_song = netease_player.current_song
+        
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'is_playing': netease_player.is_playing,
+                'is_paused': netease_player.is_paused,
+                'current_song': {
+                    'id': current_song['id'],
+                    'name': current_song['name'],
+                    'artist': current_song['artist'],
+                    'duration': current_song['duration'],
+                    'url': current_song.get('url')  # 包含播放链接
+                } if current_song else None,
+                'playlist_length': len(netease_player.playlist),
+                'current_index': netease_player.current_index
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"获取网易云音乐状态失败: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'获取状态失败: {str(e)}'
         }), 500
 
 if __name__ == '__main__':

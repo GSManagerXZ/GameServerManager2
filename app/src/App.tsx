@@ -22,6 +22,7 @@ import FileManager from './components/FileManager';
 import GameConfigManager from './components/GameConfigManager'; // 导入游戏配置文件管理组件
 import DirectoryPicker from './components/DirectoryPicker';
 import Register from './components/Register'; // 导入注册组件
+import GlobalMusicPlayer from './components/GlobalMusicPlayer'; // 导入全局音乐播放器
 import FrpManager from './components/FrpManager'; // 导入内网穿透组件
 import FrpDocModal from './components/FrpDocModal'; // 导入内网穿透文档弹窗组件
 import OnlineDeploy from './components/OnlineDeploy'; // 导入在线部署组件
@@ -5160,6 +5161,9 @@ const App: React.FC = () => {
         }}
         title="选择备份目录"
       />
+      
+      {/* 全局音乐播放器 */}
+      <GlobalMusicPlayer />
     </Layout>
   );
 };
