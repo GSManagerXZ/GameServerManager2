@@ -9705,17 +9705,28 @@ def load_netease_playlist():
                 'message': '歌单ID不能为空'
             }), 400
         
+        # 获取歌曲数量限制，默认50首
+        song_limit = data.get('song_limit', 50)
+        try:
+            song_limit = int(song_limit)
+            if song_limit <= 0:
+                song_limit = 50
+        except (ValueError, TypeError):
+            song_limit = 50
+        
         # 初始化播放器（如果还没有初始化）
         if netease_player is None:
             netease_player = NeteaseMusicPlayer()
         
         # 加载歌单
-        success = netease_player.load_playlist(playlist_id)
+        success = netease_player.load_playlist(playlist_id, song_limit)
         
         if success:
             # 获取歌单信息，包含播放链接
             songs = []
-            for song in netease_player.playlist:
+            limited_playlist = netease_player.playlist  # 已经在load_playlist中限制了数量
+            
+            for song in limited_playlist:
                 # 获取播放链接
                 song_url = netease_player.get_song_url(song['id'])
                 songs.append({
@@ -9726,10 +9737,18 @@ def load_netease_playlist():
                     'url': song_url  # 添加播放链接
                 })
             
+            total_songs = len(netease_player.playlist)
+            loaded_songs = len(songs)
+            message = f'成功加载歌单，共 {total_songs} 首歌曲，已加载前 {loaded_songs} 首'
+            if total_songs <= song_limit:
+                message = f'成功加载歌单，共 {loaded_songs} 首歌曲'
+            
             return jsonify({
                 'status': 'success',
-                'message': f'成功加载歌单，共 {len(songs)} 首歌曲',
-                'songs': songs
+                'message': message,
+                'songs': songs,
+                'total_songs': total_songs,
+                'loaded_songs': loaded_songs
             })
         else:
             return jsonify({

@@ -35,9 +35,11 @@ class NeteaseMusicPlayer:
         :param playlist_id: 歌单ID
         :return: 歌单信息和歌曲列表
         """
-        # 尝试多个API端点
+        # 尝试多个API端点，使用不同的参数获取完整歌单
         api_urls = [
-            f'https://music.163.com/api/v6/playlist/detail?id={playlist_id}'
+            f'https://music.163.com/api/playlist/detail?id={playlist_id}&n=1000',
+            f'https://music.163.com/api/v6/playlist/detail?id={playlist_id}&limit=1000&offset=0',
+            f'https://music.163.com/api/playlist/detail?id={playlist_id}'
         ]
         
         for i, url in enumerate(api_urls):
@@ -162,15 +164,19 @@ class NeteaseMusicPlayer:
             print(f"获取歌曲链接时发生错误: {e}")
             return None
     
-    def load_playlist(self, playlist_id):
+    def load_playlist(self, playlist_id, song_limit=None):
         """
         加载歌单
         :param playlist_id: 歌单ID
+        :param song_limit: 歌曲数量限制，None表示不限制
         """
         print(f"正在加载歌单 {playlist_id}...")
         playlist_info, songs = self.get_playlist_detail(playlist_id)
         
         if playlist_info and songs:
+            # 应用歌曲数量限制
+            if song_limit is not None and song_limit > 0:
+                songs = songs[:song_limit]
             self.playlist = songs
             print(f"\n歌单信息:")
             print(f"名称: {playlist_info['name']}")

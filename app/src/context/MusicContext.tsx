@@ -11,6 +11,13 @@ interface Song {
   url?: string;
 }
 
+// 播放模式枚举
+export enum PlayMode {
+  SEQUENCE = 'sequence',  // 顺序播放
+  LOOP = 'loop',         // 循环播放
+  RANDOM = 'random'      // 随机播放
+}
+
 // 音乐播放状态接口
 interface MusicState {
   playlistId: string;
@@ -20,13 +27,14 @@ interface MusicState {
   isPlaying: boolean;
   isPaused: boolean;
   isPlayerVisible: boolean;
+  playMode: PlayMode;
 }
 
 // 音乐上下文接口
 interface MusicContextType {
   musicState: MusicState;
   audioRef: React.RefObject<HTMLAudioElement>;
-  loadPlaylist: (playlistId: string) => Promise<void>;
+  loadPlaylist: (playlistId: string, songLimit?: number) => Promise<void>;
   playMusic: (songIndex?: number) => Promise<void>;
   pauseMusic: () => void;
   resumeMusic: () => void;
@@ -34,6 +42,7 @@ interface MusicContextType {
   nextSong: () => void;
   previousSong: () => void;
   setMusicState: (state: Partial<MusicState>) => void;
+  togglePlayMode: () => void;
 }
 
 // 创建上下文
@@ -61,7 +70,8 @@ const loadMusicConfig = (): MusicState => {
     currentSong: null,
     isPlaying: false,
     isPaused: false,
-    isPlayerVisible: false
+    isPlayerVisible: false,
+    playMode: PlayMode.SEQUENCE
   };
 };
 
@@ -89,11 +99,14 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children }) => {
   };
 
   // 加载歌单
-  const loadPlaylist = async (playlistId: string) => {
+  const loadPlaylist = async (playlistId: string, songLimit: number = 50) => {
     try {
       const token = localStorage.getItem('auth_token');
       const response = await axios.post('/api/netease/load_playlist', 
-        { playlist_id: playlistId },
+        { 
+          playlist_id: playlistId,
+          song_limit: songLimit
+        },
         {
           headers: {
             'Authorization': `Bearer ${token}`
@@ -109,7 +122,8 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children }) => {
           currentSong: null,
           isPlaying: false,
           isPaused: false,
-          isPlayerVisible: true
+          isPlayerVisible: true,
+          playMode: PlayMode.SEQUENCE
         });
         message.success(`成功加载歌单，共 ${songs.length} 首歌曲`);
       } else {
@@ -191,20 +205,60 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children }) => {
     });
   };
 
+  // 获取随机索引
+  const getRandomIndex = (currentIndex: number, playlistLength: number): number => {
+    if (playlistLength <= 1) return 0;
+    let randomIndex;
+    do {
+      randomIndex = Math.floor(Math.random() * playlistLength);
+    } while (randomIndex === currentIndex);
+    return randomIndex;
+  };
+
   // 下一首
   const nextSong = () => {
     if (musicState.playlist.length === 0) return;
-    const nextIndex = (musicState.currentIndex + 1) % musicState.playlist.length;
+    
+    let nextIndex: number;
+    switch (musicState.playMode) {
+      case PlayMode.RANDOM:
+        nextIndex = getRandomIndex(musicState.currentIndex, musicState.playlist.length);
+        break;
+      case PlayMode.LOOP:
+      case PlayMode.SEQUENCE:
+      default:
+        nextIndex = (musicState.currentIndex + 1) % musicState.playlist.length;
+        break;
+    }
     playMusic(nextIndex);
   };
 
   // 上一首
   const previousSong = () => {
     if (musicState.playlist.length === 0) return;
-    const prevIndex = musicState.currentIndex === 0 
-      ? musicState.playlist.length - 1 
-      : musicState.currentIndex - 1;
+    
+    let prevIndex: number;
+    switch (musicState.playMode) {
+      case PlayMode.RANDOM:
+        prevIndex = getRandomIndex(musicState.currentIndex, musicState.playlist.length);
+        break;
+      case PlayMode.LOOP:
+      case PlayMode.SEQUENCE:
+      default:
+        prevIndex = musicState.currentIndex === 0 
+          ? musicState.playlist.length - 1 
+          : musicState.currentIndex - 1;
+        break;
+    }
     playMusic(prevIndex);
+  };
+
+  // 切换播放模式
+  const togglePlayMode = () => {
+    const modes = [PlayMode.SEQUENCE, PlayMode.LOOP, PlayMode.RANDOM];
+    const currentModeIndex = modes.indexOf(musicState.playMode);
+    const nextModeIndex = (currentModeIndex + 1) % modes.length;
+    setMusicState({ playMode: modes[nextModeIndex] });
   };
 
   // 音频事件处理
@@ -221,7 +275,14 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children }) => {
     };
 
     const handleEnded = () => {
-      nextSong();
+      // 根据播放模式处理音频结束
+      if (musicState.playMode === PlayMode.SEQUENCE && musicState.currentIndex === musicState.playlist.length - 1) {
+        // 顺序播放模式下，如果是最后一首，停止播放
+        setMusicState({ isPlaying: false, isPaused: false });
+      } else {
+        // 其他情况继续播放下一首
+        nextSong();
+      }
     };
 
     audio.addEventListener('play', handlePlay);
@@ -245,7 +306,8 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children }) => {
     stopMusic,
     nextSong,
     previousSong,
-    setMusicState
+    setMusicState,
+    togglePlayMode
   };
 
   return (

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, Button, Space, Progress, Slider } from 'antd';
-import { PlayCircleOutlined, PauseOutlined, StepBackwardOutlined, StepForwardOutlined, SoundOutlined, CloseOutlined } from '@ant-design/icons';
-import { useMusic } from '../context/MusicContext';
+import { PlayCircleOutlined, PauseOutlined, StepBackwardOutlined, StepForwardOutlined, SoundOutlined, CloseOutlined, RetweetOutlined, ReloadOutlined, SwapOutlined } from '@ant-design/icons';
+import { useMusic, PlayMode } from '../context/MusicContext';
 
 const GlobalMusicPlayer: React.FC = () => {
   const { 
@@ -12,10 +12,11 @@ const GlobalMusicPlayer: React.FC = () => {
     resumeMusic, 
     nextSong, 
     previousSong,
-    setMusicState 
+    setMusicState,
+    togglePlayMode
   } = useMusic();
 
-  const { currentSong, isPlaying, isPaused, playlist, isPlayerVisible } = musicState;
+  const { currentSong, isPlaying, isPaused, playlist, isPlayerVisible, playMode } = musicState;
   const [currentTime, setCurrentTime] = useState(0);
   const [volume, setVolume] = useState(50);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -47,6 +48,34 @@ const GlobalMusicPlayer: React.FC = () => {
   // 关闭播放器
   const handleClose = () => {
     setMusicState({ isPlayerVisible: false });
+  };
+
+  // 获取播放模式图标
+  const getPlayModeIcon = () => {
+    switch (playMode) {
+      case PlayMode.SEQUENCE:
+        return <RetweetOutlined />;
+      case PlayMode.LOOP:
+        return <ReloadOutlined />;
+      case PlayMode.RANDOM:
+        return <SwapOutlined />;
+      default:
+        return <RetweetOutlined />;
+    }
+  };
+
+  // 获取播放模式文本
+  const getPlayModeText = () => {
+    switch (playMode) {
+      case PlayMode.SEQUENCE:
+        return '顺序播放';
+      case PlayMode.LOOP:
+        return '循环播放';
+      case PlayMode.RANDOM:
+        return '随机播放';
+      default:
+        return '顺序播放';
+    }
   };
 
   // 重置自动收起定时器
@@ -224,35 +253,50 @@ const GlobalMusicPlayer: React.FC = () => {
           <span style={{ fontSize: '11px', color: '#999', minWidth: '30px' }}>{volume}%</span>
         </div>
         
-        {/* 控制按钮 */}
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
+        {/* 播放模式和控制按钮 */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+          {/* 播放模式按钮 */}
           <Button 
             size="small" 
-            icon={<StepBackwardOutlined />}
-            onClick={previousSong}
-            disabled={playlist.length <= 1}
+            icon={getPlayModeIcon()}
+            onClick={togglePlayMode}
+            title={getPlayModeText()}
+            style={{ color: '#666' }}
           />
-          {isPlaying && !isPaused ? (
+          
+          {/* 播放控制按钮 */}
+          <div style={{ display: 'flex', gap: '8px' }}>
             <Button 
               size="small" 
-              type="primary"
-              icon={<PauseOutlined />}
-              onClick={pauseMusic}
+              icon={<StepBackwardOutlined />}
+              onClick={previousSong}
+              disabled={playlist.length <= 1}
             />
-          ) : (
+            {isPlaying && !isPaused ? (
+              <Button 
+                size="small" 
+                type="primary"
+                icon={<PauseOutlined />}
+                onClick={pauseMusic}
+              />
+            ) : (
+              <Button 
+                size="small" 
+                type="primary"
+                icon={<PlayCircleOutlined />}
+                onClick={isPlaying ? resumeMusic : () => playMusic()}
+              />
+            )}
             <Button 
               size="small" 
-              type="primary"
-              icon={<PlayCircleOutlined />}
-              onClick={isPlaying ? resumeMusic : () => playMusic()}
+              icon={<StepForwardOutlined />}
+              onClick={nextSong}
+              disabled={playlist.length <= 1}
             />
-          )}
-          <Button 
-            size="small" 
-            icon={<StepForwardOutlined />}
-            onClick={nextSong}
-            disabled={playlist.length <= 1}
-          />
+          </div>
+          
+          {/* 占位元素保持对称 */}
+          <div style={{ width: '24px' }}></div>
         </div>
       </Card>
     </div>

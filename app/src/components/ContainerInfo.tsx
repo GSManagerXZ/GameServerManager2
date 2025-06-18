@@ -1319,7 +1319,7 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
               size="small" 
               onClick={() => {
                 Modal.confirm({
-                  title: '输入歌单ID',
+                  title: '加载网易云音乐歌单',
                   content: (
                     <div>
                       <p>请输入网易云音乐歌单ID：</p>
@@ -1328,18 +1328,33 @@ const ContainerInfo: React.FC<ContainerInfoProps> = ({
                         type="text" 
                         placeholder="例如：19723756" 
                         defaultValue={playlistId}
+                        style={{ width: '100%', padding: '8px', border: '1px solid #d9d9d9', borderRadius: '4px', marginBottom: '12px' }}
+                      />
+                      <p>加载歌曲数量：</p>
+                      <input 
+                        id="song-limit-input" 
+                        type="number" 
+                        placeholder="默认50首" 
+                        defaultValue="50"
+                        min="1"
+                        max="1000"
                         style={{ width: '100%', padding: '8px', border: '1px solid #d9d9d9', borderRadius: '4px' }}
                       />
                       <p style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
                         推荐歌单：19723756(飙升榜)、3778678(热歌榜)
                       </p>
+                      <p style={{ marginTop: '4px', fontSize: '12px', color: '#999' }}>
+                        建议加载50-200首歌曲以获得最佳体验
+                      </p>
                     </div>
                   ),
                   onOk: () => {
-                    const input = document.getElementById('playlist-input') as HTMLInputElement;
-                    const id = input?.value?.trim();
+                    const playlistInput = document.getElementById('playlist-input') as HTMLInputElement;
+                    const songLimitInput = document.getElementById('song-limit-input') as HTMLInputElement;
+                    const id = playlistInput?.value?.trim();
+                    const limit = parseInt(songLimitInput?.value) || 50;
                     if (id) {
-                      loadPlaylist(id);
+                      loadPlaylist(id, limit);
                     }
                   }
                 });
