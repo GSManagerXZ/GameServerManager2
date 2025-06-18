@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Form, Input, Button, Card, message, Typography, Modal } from 'antd';
+import { Form, Input, Button, Card, message, Typography, Modal, Tooltip } from 'antd';
 import { UserOutlined, LockOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
@@ -187,12 +187,65 @@ const Login: React.FC = () => {
     }
   };
   
-  // 使用生物识别登录
-  const loginWithBiometric = async () => {
+  // 检查生物识别支持并显示详细错误信息
+  const checkBiometricSupportWithDetails = () => {
+    const reasons = [];
+    
+    if (typeof window.PublicKeyCredential === 'undefined') {
+      reasons.push('浏览器不支持Web Authentication API');
+    }
+    
+    if (!navigator.credentials) {
+      reasons.push('浏览器不支持Credentials API');
+    }
+    
+    if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+      reasons.push('需要HTTPS安全连接或本地环境');
+    }
+    
+    return {
+      supported: reasons.length === 0,
+      reasons
+    };
+  };
+  
+  // 处理生物识别按钮点击
+  const handleBiometricClick = () => {
     if (!biometricSupported) {
-      message.error('当前环境不支持生物识别认证');
+      const { reasons } = checkBiometricSupportWithDetails();
+      
+      Modal.warning({
+        title: '生物识别不可用',
+        content: (
+          <div>
+            <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: '#f0f8ff', borderRadius: '6px', border: '1px solid #d1ecf1' }}>
+              <h4 style={{ margin: '0 0 8px 0', color: '#0c5460', fontSize: '14px' }}>💡 什么是生物识别？</h4>
+              <p style={{ margin: 0, fontSize: '13px', color: '#0c5460', lineHeight: '1.5' }}>
+                生物识别是一种基于Web Authentication API技术实现的安全认证方式。它允许网站使用设备内置的生物识别功能（如指纹识别、面部识别等）进行身份验证，无需输入密码。这种方式不仅方便快捷，而且更加安全，因为生物特征数据始终存储在设备的安全区域内，不会传输到网站服务器。Web Authentication API（也称为WebAuthn）是W3C和FIDO联盟共同制定的网络标准，已被主流浏览器广泛支持
+              </p>
+            </div>
+            <p>您的浏览器或环境不支持生物识别登录，原因如下：</p>
+            <ul style={{ marginTop: '8px', paddingLeft: '20px' }}>
+              {reasons.map((reason, index) => (
+                <li key={index} style={{ marginBottom: '4px' }}>{reason}</li>
+              ))}
+            </ul>
+            <p style={{ marginTop: '12px', color: '#666' }}>
+              建议：使用支持WebAuthn的现代浏览器（如Chrome、Edge、Firefox、Safari等）并确保在HTTPS环境下访问。
+            </p>
+          </div>
+        ),
+        okText: '我知道了',
+        width: 600
+      });
       return;
     }
+    
+    loginWithBiometric();
+  };
+
+  // 使用生物识别登录
+  const loginWithBiometric = async () => {
     
     try {
       setBiometricLoading(true);
@@ -414,17 +467,73 @@ const Login: React.FC = () => {
         
         // 如果支持生物识别且用户还未注册，询问是否注册
         if (biometricSupported) {
-          setTimeout(() => {
-            Modal.confirm({
-              title: '生物识别认证',
-              content: '是否要为您的账户注册生物识别认证（如指纹、面部识别等）？这将让您下次登录更加便捷和安全。',
-              okText: '注册',
-              cancelText: '跳过',
-              onOk: () => {
-                registerBiometric(values.username);
-              },
-            });
-          }, 1000);
+          // 检查用户是否已经选择永久跳过
+          const skipBiometric = localStorage.getItem(`skipBiometric_${values.username}`);
+          if (skipBiometric !== 'true') {
+            setTimeout(() => {
+              Modal.confirm({
+                title: '生物识别认证',
+                content: (
+                  <div>
+                    <p>是否要为您的账户注册生物识别认证（如指纹、面部识别等）？这将让您下次登录更加便捷和安全。</p>
+                    <div style={{ marginTop: '16px', display: 'flex', gap: '8px' }}>
+                      <button 
+                        style={{
+                          padding: '6px 12px',
+                          border: '1px solid #d9d9d9',
+                          borderRadius: '4px',
+                          background: '#fff',
+                          cursor: 'pointer',
+                          fontSize: '14px'
+                        }}
+                        onClick={() => {
+                          registerBiometric(values.username);
+                          Modal.destroyAll();
+                        }}
+                      >
+                        注册
+                      </button>
+                      <button 
+                        style={{
+                          padding: '6px 12px',
+                          border: '1px solid #d9d9d9',
+                          borderRadius: '4px',
+                          background: '#fff',
+                          cursor: 'pointer',
+                          fontSize: '14px'
+                        }}
+                        onClick={() => {
+                          Modal.destroyAll();
+                        }}
+                      >
+                        取消
+                      </button>
+                      <button 
+                        style={{
+                          padding: '6px 12px',
+                          border: '1px solid #ff4d4f',
+                          borderRadius: '4px',
+                          background: '#fff',
+                          color: '#ff4d4f',
+                          cursor: 'pointer',
+                          fontSize: '14px'
+                        }}
+                        onClick={() => {
+                          localStorage.setItem(`skipBiometric_${values.username}`, 'true');
+                          Modal.destroyAll();
+                          message.info('已永久跳过生物识别注册');
+                        }}
+                      >
+                        永久跳过
+                      </button>
+                    </div>
+                  </div>
+                ),
+                footer: null, // 隐藏默认按钮
+                width: 500
+              });
+            }, 1000);
+          }
         }
         
         // 延迟导航，等待动画完成
@@ -564,27 +673,33 @@ const Login: React.FC = () => {
             </Button>
           </Form.Item>
           
-          {biometricSupported && (
-            <Form.Item>
+          <Form.Item>
+            <Tooltip 
+              title={!biometricSupported ? "您的浏览器不支持生物识别，点击查看详情" : ""}
+              placement="top"
+            >
               <Button 
                 type="default" 
                 icon={<SafetyCertificateOutlined />}
                 loading={biometricLoading}
                 block
                 className="biometric-login-button"
-                onClick={loginWithBiometric}
+                onClick={handleBiometricClick}
                 style={{
                   marginTop: '8px',
-                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  background: biometricSupported 
+                    ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' 
+                    : '#f5f5f5',
                   border: 'none',
-                  color: 'white',
-                  fontWeight: '500'
+                  color: biometricSupported ? 'white' : '#bfbfbf',
+                  fontWeight: '500',
+                  cursor: 'pointer'
                 }}
               >
                 生物识别登录
               </Button>
-            </Form.Item>
-          )}
+            </Tooltip>
+          </Form.Item>
           
           <div style={{ textAlign: 'center', display: 'flex', justifyContent: 'space-between' }}>
             <Text type="secondary">

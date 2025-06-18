@@ -266,34 +266,106 @@ const Register: React.FC<RegisterProps> = ({ onRegisterSuccess }) => {
         
         // 检查是否支持生物识别，如果支持则询问用户是否注册
         if (biometricSupported) {
-          Modal.confirm({
-            title: '设置生物识别登录',
-            icon: <SafetyCertificateOutlined />,
-            content: '您的设备支持生物识别认证，是否现在设置生物识别登录？这将让您下次登录更加便捷和安全。',
-            okText: '立即设置',
-            cancelText: '稍后设置',
-            onOk: async () => {
-              await registerBiometric(values.username);
-              // 注册生物识别后再跳转
-              setTimeout(() => {
-                if (onRegisterSuccess) {
-                  onRegisterSuccess(response.data.token, values.username, response.data.role || 'user');
-                } else {
-                  navigate('/');
-                }
-              }, 1000);
-            },
-            onCancel: () => {
-              // 用户选择稍后设置，直接跳转
-              setTimeout(() => {
-                if (onRegisterSuccess) {
-                  onRegisterSuccess(response.data.token, values.username, response.data.role || 'user');
-                } else {
-                  navigate('/');
-                }
-              }, 500);
-            },
-          });
+          // 检查用户是否已经选择永久跳过
+          const skipBiometric = localStorage.getItem(`skipBiometric_${values.username}`);
+          if (skipBiometric !== 'true') {
+            Modal.confirm({
+              title: '设置生物识别登录',
+              icon: <SafetyCertificateOutlined />,
+              content: (
+                <div>
+                  <p>您的设备支持生物识别认证，是否现在设置生物识别登录？这将让您下次登录更加便捷和安全。</p>
+                  <div style={{ marginTop: '16px', display: 'flex', gap: '8px' }}>
+                    <button 
+                      style={{
+                        padding: '6px 12px',
+                        border: '1px solid #1890ff',
+                        borderRadius: '4px',
+                        background: '#1890ff',
+                        color: '#fff',
+                        cursor: 'pointer',
+                        fontSize: '14px'
+                      }}
+                      onClick={async () => {
+                        await registerBiometric(values.username);
+                        Modal.destroyAll();
+                        // 注册生物识别后再跳转
+                        setTimeout(() => {
+                          if (onRegisterSuccess) {
+                            onRegisterSuccess(response.data.token, values.username, response.data.role || 'user');
+                          } else {
+                            navigate('/');
+                          }
+                        }, 1000);
+                      }}
+                    >
+                      立即设置
+                    </button>
+                    <button 
+                      style={{
+                        padding: '6px 12px',
+                        border: '1px solid #d9d9d9',
+                        borderRadius: '4px',
+                        background: '#fff',
+                        cursor: 'pointer',
+                        fontSize: '14px'
+                      }}
+                      onClick={() => {
+                        Modal.destroyAll();
+                        // 用户选择稍后设置，直接跳转
+                        setTimeout(() => {
+                          if (onRegisterSuccess) {
+                            onRegisterSuccess(response.data.token, values.username, response.data.role || 'user');
+                          } else {
+                            navigate('/');
+                          }
+                        }, 500);
+                      }}
+                    >
+                      稍后设置
+                    </button>
+                    <button 
+                      style={{
+                        padding: '6px 12px',
+                        border: '1px solid #ff4d4f',
+                        borderRadius: '4px',
+                        background: '#fff',
+                        color: '#ff4d4f',
+                        cursor: 'pointer',
+                        fontSize: '14px'
+                      }}
+                      onClick={() => {
+                        localStorage.setItem(`skipBiometric_${values.username}`, 'true');
+                        Modal.destroyAll();
+                        message.info('已永久跳过生物识别设置');
+                        // 永久跳过后直接跳转
+                        setTimeout(() => {
+                          if (onRegisterSuccess) {
+                            onRegisterSuccess(response.data.token, values.username, response.data.role || 'user');
+                          } else {
+                            navigate('/');
+                          }
+                        }, 500);
+                      }}
+                    >
+                      永久跳过
+                    </button>
+                  </div>
+                </div>
+              ),
+              footer: null, // 隐藏默认按钮
+              width: 500
+            });
+          } else {
+            // 用户已选择永久跳过，直接跳转
+            setTimeout(() => {
+              if (onRegisterSuccess) {
+                onRegisterSuccess(response.data.token, values.username, response.data.role || 'user');
+              } else {
+                navigate('/');
+              }
+            }, 500);
+          }
         } else {
           // 不支持生物识别，延迟导航，等待动画完成
           setTimeout(() => {
