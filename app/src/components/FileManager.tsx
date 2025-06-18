@@ -39,9 +39,8 @@ interface FileInfo {
   modified: string;
 }
 
-interface ClipboardItem {
-  path: string;
-  type: 'file' | 'directory';
+  interface ClipboardItem {
+  files: { path: string; type: 'file' | 'directory'; name: string }[];
   operation: 'copy' | 'cut';
 }
 
@@ -116,8 +115,8 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', 
   const [showSearchResults, setShowSearchResults] = useState<boolean>(false);
 
   // 创建函数引用，避免循环依赖
-  const copyToClipboardRef = useRef<(file: FileInfo) => void>();
-  const cutToClipboardRef = useRef<(file: FileInfo) => void>();
+  const copyToClipboardRef = useRef<(files?: FileInfo[]) => void>();
+  const cutToClipboardRef = useRef<(files?: FileInfo[]) => void>();
   const pasteFromClipboardRef = useRef<() => void>();
   const loadDirectoryRef = useRef<(path: string) => void>();
 
@@ -504,13 +503,17 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', 
         case 'c':
           e.preventDefault();
           if (selectedFilesRef.current.length > 0 && copyToClipboardRef.current) {
-            copyToClipboardRef.current(selectedFilesRef.current[0]);
+            copyToClipboardRef.current(selectedFilesRef.current);
+          } else {
+            message.info('请先选择要复制的文件或文件夹');
           }
           break;
         case 'x':
           e.preventDefault();
           if (selectedFilesRef.current.length > 0 && cutToClipboardRef.current) {
-            cutToClipboardRef.current(selectedFilesRef.current[0]);
+            cutToClipboardRef.current(selectedFilesRef.current);
+          } else {
+            message.info('请先选择要剪切的文件或文件夹');
           }
           break;
         case 'v':
@@ -710,59 +713,116 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', 
   // 更新loadDirectoryRef
   loadDirectoryRef.current = loadDirectory;
 
-  // 复制文件/文件夹到剪贴板
-  const copyToClipboard = useCallback((file: FileInfo) => {
+  // 复制文件/文件夹到剪贴板（支持多选）
+  const copyToClipboard = useCallback((files?: FileInfo[]) => {
+    const filesToCopy = files || selectedFiles;
+    if (filesToCopy.length === 0) {
+      message.info('请先选择要复制的文件或文件夹');
+      return;
+    }
+    
     setClipboard({
-      path: file.path,
-      type: file.type,
+      files: filesToCopy.map(file => ({ path: file.path, type: file.type, name: file.name })),
       operation: 'copy'
     });
-    message.success(`已复制${file.type === 'file' ? '文件' : '文件夹'} "${file.name}"`);
-  }, []);
+    
+    if (filesToCopy.length === 1) {
+      message.success(`已复制${filesToCopy[0].type === 'file' ? '文件' : '文件夹'} "${filesToCopy[0].name}"`);
+    } else {
+      message.success(`已复制 ${filesToCopy.length} 个文件/文件夹`);
+    }
+  }, [selectedFiles]);
 
   // 更新copyToClipboardRef
   copyToClipboardRef.current = copyToClipboard;
 
-  // 剪切文件/文件夹到剪贴板
-  const cutToClipboard = useCallback((file: FileInfo) => {
+  // 剪切文件/文件夹到剪贴板（支持多选）
+  const cutToClipboard = useCallback((files?: FileInfo[]) => {
+    const filesToCut = files || selectedFiles;
+    if (filesToCut.length === 0) {
+      message.info('请先选择要剪切的文件或文件夹');
+      return;
+    }
+    
     setClipboard({
-      path: file.path,
-      type: file.type,
+      files: filesToCut.map(file => ({ path: file.path, type: file.type, name: file.name })),
       operation: 'cut'
     });
-    message.success(`已剪切${file.type === 'file' ? '文件' : '文件夹'} "${file.name}"`);
-  }, []);
+    
+    if (filesToCut.length === 1) {
+      message.success(`已剪切${filesToCut[0].type === 'file' ? '文件' : '文件夹'} "${filesToCut[0].name}"`);
+    } else {
+      message.success(`已剪切 ${filesToCut.length} 个文件/文件夹`);
+    }
+  }, [selectedFiles]);
 
   // 更新cutToClipboardRef
   cutToClipboardRef.current = cutToClipboard;
 
-  // 粘贴文件/文件夹
+  // 粘贴文件/文件夹（支持多个文件）
   const pasteFromClipboard = useCallback(async () => {
-    if (!clipboard) return;
-    
-    const fileName = clipboard.path.split('/').pop() || '';
-    const destinationPath = `${currentPath}/${fileName}`;
+    if (!clipboard || clipboard.files.length === 0) {
+      message.info('剪贴板为空');
+      return;
+    }
     
     setLoading(true);
+    
     try {
-      const response = await axios.post(`/api/${clipboard.operation === 'copy' ? 'copy' : 'move'}`, {
-        sourcePath: clipboard.path,
-        destinationPath
-      });
+      let successCount = 0;
+      let failCount = 0;
+      const errors: string[] = [];
       
-      if (response.data.status === 'success') {
-        message.success(`${clipboard.type === 'file' ? '文件' : '文件夹'}已${clipboard.operation === 'copy' ? '复制' : '移动'}`);
-        
-        // 如果是剪切操作，清空剪贴板
-        if (clipboard.operation === 'cut') {
-          setClipboard(null);
+      // 逐个处理每个文件
+      for (const file of clipboard.files) {
+        try {
+          const fileName = file.name;
+          const destinationPath = `${currentPath}/${fileName}`;
+          
+          const response = await axios.post(`/api/${clipboard.operation === 'copy' ? 'copy' : 'move'}`, {
+            sourcePath: file.path,
+            destinationPath
+          });
+          
+          if (response.data.status === 'success') {
+            successCount++;
+          } else {
+            failCount++;
+            errors.push(`${fileName}: ${response.data.message || '操作失败'}`);
+          }
+        } catch (error: any) {
+          failCount++;
+          errors.push(`${file.name}: ${error.message}`);
         }
-        
-        if (loadDirectoryRef.current) {
-          loadDirectoryRef.current(currentPath);
+      }
+      
+      // 显示结果消息
+      if (successCount > 0 && failCount === 0) {
+        if (clipboard.files.length === 1) {
+          message.success(`${clipboard.files[0].type === 'file' ? '文件' : '文件夹'}已${clipboard.operation === 'copy' ? '复制' : '移动'}`);
+        } else {
+          message.success(`成功${clipboard.operation === 'copy' ? '复制' : '移动'} ${successCount} 个文件/文件夹`);
+        }
+      } else if (successCount > 0 && failCount > 0) {
+        message.warning(`${clipboard.operation === 'copy' ? '复制' : '移动'}完成: ${successCount} 个成功, ${failCount} 个失败`);
+        if (errors.length > 0) {
+          console.error('操作失败的文件:', errors);
         }
       } else {
-        message.error(response.data.message || `${clipboard.operation === 'copy' ? '复制' : '移动'}失败`);
+        message.error(`${clipboard.operation === 'copy' ? '复制' : '移动'}失败`);
+        if (errors.length > 0) {
+          console.error('操作失败的文件:', errors);
+        }
+      }
+      
+      // 如果是剪切操作且有成功的文件，清空剪贴板
+      if (clipboard.operation === 'cut' && successCount > 0) {
+        setClipboard(null);
+      }
+      
+      // 刷新目录
+      if (loadDirectoryRef.current) {
+        loadDirectoryRef.current(currentPath);
       }
     } catch (error: any) {
       message.error(`${clipboard.operation === 'copy' ? '复制' : '移动'}失败: ${error.message}`);
@@ -1179,14 +1239,14 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', 
             <Button 
               type="text" 
               icon={<CopyOutlined />} 
-              onClick={() => copyToClipboard(record)} 
+              onClick={() => copyToClipboard([record])} 
             />
           </Tooltip>
           <Tooltip title="剪切">
             <Button 
               type="text" 
               icon={<ScissorOutlined />} 
-              onClick={() => cutToClipboard(record)} 
+              onClick={() => cutToClipboard([record])} 
             />
           </Tooltip>
           <Tooltip title="重命名">
@@ -2205,16 +2265,28 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', 
               )}
               <Menu.Divider />
               <Menu.Item key="copy" onClick={() => {
-                copyToClipboard(contextMenuFile);
+                // 如果右键点击的文件在选中列表中，则复制所有选中的文件；否则只复制当前文件
+                const filesToCopy = selectedFiles.some(f => f.path === contextMenuFile.path) 
+                  ? selectedFiles 
+                  : [contextMenuFile];
+                copyToClipboard(filesToCopy);
                 hideAllContextMenus();
               }} icon={<CopyOutlined />}>
-                复制
+                {selectedFiles.some(f => f.path === contextMenuFile.path) && selectedFiles.length > 1 
+                  ? `复制 (${selectedFiles.length} 项)` 
+                  : '复制'}
               </Menu.Item>
               <Menu.Item key="cut" onClick={() => {
-                cutToClipboard(contextMenuFile);
+                // 如果右键点击的文件在选中列表中，则剪切所有选中的文件；否则只剪切当前文件
+                const filesToCut = selectedFiles.some(f => f.path === contextMenuFile.path) 
+                  ? selectedFiles 
+                  : [contextMenuFile];
+                cutToClipboard(filesToCut);
                 hideAllContextMenus();
               }} icon={<ScissorOutlined />}>
-                剪切
+                {selectedFiles.some(f => f.path === contextMenuFile.path) && selectedFiles.length > 1 
+                  ? `剪切 (${selectedFiles.length} 项)` 
+                  : '剪切'}
               </Menu.Item>
               <Menu.Item key="copy-path" onClick={() => {
                 // 复制文件路径到系统剪贴板
