@@ -2487,7 +2487,7 @@ const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/home/steam', 
           okText="保存"
           cancelText="取消"
           bodyStyle={{ 
-            maxHeight: '80vh',
+            maxHeight: '90vh',
             overflow: 'hidden',
             padding: '12px'
           }}
